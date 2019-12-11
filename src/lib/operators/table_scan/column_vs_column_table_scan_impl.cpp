@@ -168,6 +168,8 @@ ColumnVsColumnTableScanImpl::_typed_scan_chunk_with_iterators(ChunkID chunk_id, 
         return predicate_comparator(left.value(), right.value());
       };
 
+      std::cout << "comparing " << typeid(decltype(left_it.value())).name << " with " << typeid(decltype(left_it.value())).name << std::endl;
+
       if (condition_was_flipped) {
         const auto erased_comparator = conditionally_erase_comparator_type(comparator, right_it, left_it);
         AbstractTableScanImpl::_scan_with_iterators<true>(erased_comparator, right_it, right_end, chunk_id,
