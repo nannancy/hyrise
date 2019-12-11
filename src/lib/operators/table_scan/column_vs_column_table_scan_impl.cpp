@@ -67,8 +67,8 @@ std::shared_ptr<PosList> ColumnVsColumnTableScanImpl::scan_chunk(ChunkID chunk_i
           auto right_iterable =
               ReferenceSegmentIterable<ColumnDataType, EraseReferencedSegmentType::No>{*right_typed_segment};
 
-          left_iterable.with_iterators([&](auto left_it, const auto left_end) {
-            right_iterable.with_iterators([&](auto right_it, const auto right_end) {
+          left_iterable.with_iterators([&](auto left_it, [[maybe_unused]] const auto left_end) {
+            right_iterable.with_iterators([&](auto right_it, [[maybe_unused]] const auto right_end) {
               if constexpr (std::is_same_v<std::decay_t<decltype(left_it)>,
                                            std::decay_t<decltype(right_it)>>) {  // NOLINT
                 // Either both reference segments use the MultipleChunkIterator (which uses erased accessors anyway)
@@ -168,7 +168,7 @@ ColumnVsColumnTableScanImpl::_typed_scan_chunk_with_iterators(ChunkID chunk_id, 
         return predicate_comparator(left.value(), right.value());
       };
 
-      std::cout << "comparing " << typeid(decltype(left_it->value())).name() << " with " << typeid(decltype(left_it->value())).name() << std::endl;
+      // std::cout << "comparing " << typeid(decltype(left_it->value())).name() << " with " << typeid(decltype(left_it->value())).name() << std::endl;
 
       if (condition_was_flipped) {
         const auto erased_comparator = conditionally_erase_comparator_type(comparator, right_it, left_it);

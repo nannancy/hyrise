@@ -36,6 +36,15 @@ class AggregateFunctionBuilder {
   void get_aggregate_function() { Fail("Invalid aggregate function"); }
 };
 
+
+inline bool value_smaller(const std::string_view& l, const pmr_string& r) {
+  return l < r;
+}
+
+inline bool value_greater(const std::string_view& l, const pmr_string& r) {
+  return l > r;
+}
+
 template <typename ColumnDataType, typename AggregateType>
 class AggregateFunctionBuilder<ColumnDataType, AggregateType, AggregateFunction::Min> {
  public:
@@ -144,7 +153,7 @@ template <typename ColumnDataType, typename AggregateType>
 class AggregateFunctionBuilder<ColumnDataType, AggregateType, AggregateFunction::Count> {
  public:
   auto get_aggregate_function() {
-    return [](const ColumnDataType&, std::optional<AggregateType>& current_primary_aggregate,
+    return [](const auto&, std::optional<AggregateType>& current_primary_aggregate,
               std::vector<AggregateType>& current_secondary_aggregates) {};
   }
 };
@@ -153,7 +162,7 @@ template <typename ColumnDataType, typename AggregateType>
 class AggregateFunctionBuilder<ColumnDataType, AggregateType, AggregateFunction::CountDistinct> {
  public:
   auto get_aggregate_function() {
-    return [](const ColumnDataType&, std::optional<AggregateType>& current_primary_aggregate,
+    return [](const auto&, std::optional<AggregateType>& current_primary_aggregate,
               std::vector<AggregateType>& current_secondary_aggregates) {};
   }
 };
