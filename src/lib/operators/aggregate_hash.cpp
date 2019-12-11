@@ -118,8 +118,10 @@ void AggregateHash::_aggregate_segment(ChunkID chunk_id, ColumnID column_index, 
     * If the value is NULL, the current aggregate value does not change.
     */
     if (!position.is_null()) {
+      const auto value = resolve_temp_type(position.value());
+
       // If we have a value, use the aggregator lambda to update the current aggregate value for this group
-      aggregator(position.value(), result.current_primary_aggregate, result.current_secondary_aggregates);
+      aggregator(value, result.current_primary_aggregate, result.current_secondary_aggregates);
 
       // increase value counter
       ++result.aggregate_count;
@@ -127,7 +129,7 @@ void AggregateHash::_aggregate_segment(ChunkID chunk_id, ColumnID column_index, 
       if constexpr (function == AggregateFunction::CountDistinct) {  // NOLINT
         // clang-tidy error: https://bugs.llvm.org/show_bug.cgi?id=35824
         // for the case of CountDistinct, insert this value into the set to keep track of distinct values
-        result.distinct_values.insert(position.value());
+        result.distinct_values.insert(value);
       }
     }
 
@@ -249,7 +251,7 @@ void AggregateHash::_aggregate() {
                 keys_per_chunk[chunk_id][chunk_offset][group_column_index] = 0u;
               }
             } else {
-              auto inserted = id_map.try_emplace(position.value(), id_counter);
+              auto inserted = id_map.try_emplace(resolve_temp_type(position.value()), id_counter);  // TODO rename to materialize temp type?
               // store either the current id_counter or the existing ID of the value
               if constexpr (std::is_same_v<AggregateKey, AggregateKeyEntry>) {
                 keys_per_chunk[chunk_id][chunk_offset] = inserted.first->second;

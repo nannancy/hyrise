@@ -157,7 +157,7 @@ class ColumnMaterializer {
           null_rows_output->emplace_back(row_id);
         }
       } else {
-        output.emplace_back(row_id, position.value());
+        output.emplace_back(row_id, resolve_temp_type(position.value()));
       }
     });
 
@@ -231,7 +231,7 @@ class ColumnMaterializer {
             null_rows_output->emplace_back(row_id);
           }
         } else {
-          output.emplace_back(row_id, position.value());
+          output.emplace_back(row_id, resolve_temp_type(position.value()));
         }
       });
     }

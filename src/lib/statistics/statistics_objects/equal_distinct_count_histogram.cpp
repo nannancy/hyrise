@@ -23,15 +23,16 @@ void add_segment_to_value_distribution(const BaseSegment& segment,
   segment_iterate<T>(segment, [&](const auto& iterator_value) {
     if (iterator_value.is_null()) return;
 
+    const auto value = resolve_temp_type(iterator_value.value());
     if constexpr (std::is_same_v<T, pmr_string>) {
       // Do "contains()" check first to avoid the string copy incurred by string_to_domain() where possible
-      if (domain.contains(iterator_value.value())) {
-        ++value_distribution[iterator_value.value()];
+      if (domain.contains(value)) {
+        ++value_distribution[value];
       } else {
-        ++value_distribution[domain.string_to_domain(iterator_value.value())];
+        ++value_distribution[domain.string_to_domain(value)];
       }
     } else {
-      ++value_distribution[iterator_value.value()];
+      ++value_distribution[value];
     }
   });
 }

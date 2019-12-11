@@ -66,6 +66,7 @@ class HistogramDomain<pmr_string> {
    * @return whether @param string_value consists exclusively of characters between `min_char` and `max_char`
    */
   bool contains(const pmr_string& string_value) const;
+  bool contains(const std::string_view& string_value) const;
 
   /**
    * @return max_char - min_char + 1

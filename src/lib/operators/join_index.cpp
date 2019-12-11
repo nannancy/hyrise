@@ -339,43 +339,44 @@ std::vector<IndexRange> JoinIndex::_index_ranges_for_value(const SegmentPosition
   index_ranges.reserve(2);
 
   if (!probe_side_position.is_null()) {
+    const auto value = resolve_temp_type(probe_side_position.value());
     auto range_begin = AbstractIndex::Iterator{};
     auto range_end = AbstractIndex::Iterator{};
 
     switch (_adjusted_primary_predicate.predicate_condition) {
       case PredicateCondition::Equals: {
-        range_begin = index->lower_bound({probe_side_position.value()});
-        range_end = index->upper_bound({probe_side_position.value()});
+        range_begin = index->lower_bound({value});
+        range_end = index->upper_bound({value});
         break;
       }
       case PredicateCondition::NotEquals: {
         // first, get all values less than the search value
         range_begin = index->cbegin();
-        range_end = index->lower_bound({probe_side_position.value()});
+        range_end = index->lower_bound({value});
         index_ranges.emplace_back(IndexRange{range_begin, range_end});
 
         // set range for second half to all values greater than the search value
-        range_begin = index->upper_bound({probe_side_position.value()});
+        range_begin = index->upper_bound({value});
         range_end = index->cend();
         break;
       }
       case PredicateCondition::GreaterThan: {
         range_begin = index->cbegin();
-        range_end = index->lower_bound({probe_side_position.value()});
+        range_end = index->lower_bound({value});
         break;
       }
       case PredicateCondition::GreaterThanEquals: {
         range_begin = index->cbegin();
-        range_end = index->upper_bound({probe_side_position.value()});
+        range_end = index->upper_bound({value});
         break;
       }
       case PredicateCondition::LessThan: {
-        range_begin = index->upper_bound({probe_side_position.value()});
+        range_begin = index->upper_bound({value});
         range_end = index->cend();
         break;
       }
       case PredicateCondition::LessThanEquals: {
-        range_begin = index->lower_bound({probe_side_position.value()});
+        range_begin = index->lower_bound({value});
         range_end = index->cend();
         break;
       }

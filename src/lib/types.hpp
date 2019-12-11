@@ -279,6 +279,21 @@ std::ostream& operator<<(std::ostream& stream, TableType table_type);
 
 using BoolAsByteType = uint8_t;
 
+template <typename T>
+std::enable_if_t<std::is_same_v<std::decay_t<T>, std::string_view>, pmr_string> resolve_temp_type(const T& value) {
+  return pmr_string{value};
+}
+
+template <typename T>
+std::enable_if_t<!std::is_same_v<std::decay_t<T>, std::string_view>, T&&> resolve_temp_type(T&& value) {
+  return std::forward<T>(value);
+}
+
+template <typename T>
+std::enable_if_t<!std::is_same_v<std::decay_t<T>, std::string_view>, const T&> resolve_temp_type(const T& value) {
+  return value;
+}
+
 }  // namespace opossum
 
 namespace std {

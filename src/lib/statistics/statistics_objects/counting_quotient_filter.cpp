@@ -96,7 +96,7 @@ template <typename ElementType>
 void CountingQuotientFilter<ElementType>::populate(const std::shared_ptr<const BaseSegment>& segment) {
   segment_iterate<ElementType>(*segment, [&](const auto& position) {
     if (position.is_null()) return;
-    insert(position.value());
+    insert(resolve_temp_type(position.value()));
   });
 }
 

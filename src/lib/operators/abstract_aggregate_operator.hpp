@@ -40,7 +40,7 @@ template <typename ColumnDataType, typename AggregateType>
 class AggregateFunctionBuilder<ColumnDataType, AggregateType, AggregateFunction::Min> {
  public:
   auto get_aggregate_function() {
-    return [](const ColumnDataType& new_value, std::optional<AggregateType>& current_primary_aggregate,
+    return [](const auto& new_value, std::optional<AggregateType>& current_primary_aggregate,
               std::vector<AggregateType>& current_secondary_aggregates) {
       if (!current_primary_aggregate || value_smaller(new_value, *current_primary_aggregate)) {
         // New minimum found
@@ -54,7 +54,7 @@ template <typename ColumnDataType, typename AggregateType>
 class AggregateFunctionBuilder<ColumnDataType, AggregateType, AggregateFunction::Max> {
  public:
   auto get_aggregate_function() {
-    return [](const ColumnDataType& new_value, std::optional<AggregateType>& current_primary_aggregate,
+    return [](const auto& new_value, std::optional<AggregateType>& current_primary_aggregate,
               std::vector<AggregateType>& current_secondary_aggregates) {
       if (!current_primary_aggregate || value_greater(new_value, *current_primary_aggregate)) {
         // New maximum found
@@ -68,7 +68,7 @@ template <typename ColumnDataType, typename AggregateType>
 class AggregateFunctionBuilder<ColumnDataType, AggregateType, AggregateFunction::Sum> {
  public:
   auto get_aggregate_function() {
-    return [](const ColumnDataType& new_value, std::optional<AggregateType>& current_primary_aggregate,
+    return [](const auto& new_value, std::optional<AggregateType>& current_primary_aggregate,
               std::vector<AggregateType>& current_secondary_aggregates) {
       // add new value to sum
       if (current_primary_aggregate) {
@@ -97,7 +97,7 @@ template <typename ColumnDataType, typename AggregateType>
 class AggregateFunctionBuilder<ColumnDataType, AggregateType, AggregateFunction::StandardDeviationSample> {
  public:
   auto get_aggregate_function() {
-    return [](const ColumnDataType& new_value, std::optional<AggregateType>& current_primary_aggregate,
+    return [](const auto& new_value, std::optional<AggregateType>& current_primary_aggregate,
               std::vector<AggregateType>& current_secondary_aggregates) {
       if constexpr (std::is_arithmetic_v<ColumnDataType>) {
         // Welford's online algorithm

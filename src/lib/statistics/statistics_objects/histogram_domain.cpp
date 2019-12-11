@@ -53,6 +53,10 @@ pmr_string HistogramDomain<pmr_string>::string_to_domain(const pmr_string& strin
 }
 
 bool HistogramDomain<pmr_string>::contains(const pmr_string& string_value) const {
+  return contains(std::string_view{string_value});
+}
+
+bool HistogramDomain<pmr_string>::contains(const std::string_view& string_value) const {
   for (const auto char_value : string_value) {
     if (char_value > max_char || char_value < min_char) {
       return false;

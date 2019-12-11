@@ -71,7 +71,7 @@ void BTreeIndexImpl<DataType>::_bulk_insert(const std::shared_ptr<const BaseSegm
     if (position.is_null()) {
       null_positions.emplace_back(position.chunk_offset());
     } else {
-      values.push_back({position.chunk_offset(), position.value()});
+      values.push_back({position.chunk_offset(), resolve_temp_type(position.value())});
     }
   });
 
