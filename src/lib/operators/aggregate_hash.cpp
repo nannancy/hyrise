@@ -222,17 +222,19 @@ void AggregateHash::_aggregate() {
       resolve_data_type(data_type, [&](auto type) {
         using ColumnDataType = typename decltype(type)::type;
 
-        if constexpr (std::is_same_v<ColumnDataType, int32_t>) {  // TODO add for float, can't do for int64_t because of NULL
+        if constexpr (!std::is_same_v<ColumnDataType, pmr_string>) {  // TODO can't do for 64-bit types because of NULL
           for (ChunkID chunk_id{0}; chunk_id < chunk_count; ++chunk_id) {
             const auto chunk_in = input_table->get_chunk(chunk_id);
             const auto base_segment = chunk_in->get_segment(column_id);
             ChunkOffset chunk_offset{0};
             segment_iterate<ColumnDataType>(*base_segment, [&](const auto& position) {
               if constexpr (std::is_same_v<AggregateKey, AggregateKeyEntry>) {
+                // TODO deal with NULL
                 keys_per_chunk[chunk_id][chunk_offset] = position.value();
               } else {
                 keys_per_chunk[chunk_id][chunk_offset][group_column_index] = position.value();
               }
+              ++chunk_offset;
             });
           }
         } else {
