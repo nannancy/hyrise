@@ -3,6 +3,7 @@
 #include <iterator>
 #include <type_traits>
 
+#include "storage/reference_segment/reference_segment_iterable.hpp"
 #include "storage/segment_iterables.hpp"
 #include "storage/segment_iterables/any_segment_iterator.hpp"
 
@@ -10,8 +11,6 @@ namespace opossum {
 
 template <typename ValueType>
 class AnySegmentIterable;
-
-class BaseSegment;
 
 /**
  * @brief Wraps passed segment iterable in an AnySegmentIterable

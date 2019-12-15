@@ -217,73 +217,54 @@ void AggregateHash::_aggregate() {
       const auto column_id = _groupby_column_ids.at(group_column_index);
       const auto data_type = input_table->column_data_type(column_id);
 
-      const auto chunk_count = input_table->chunk_count();
-
       resolve_data_type(data_type, [&](auto type) {
         using ColumnDataType = typename decltype(type)::type;
 
-        if constexpr (!std::is_same_v<ColumnDataType, pmr_string>) {  // TODO can't do for 64-bit types because of NULL
-          for (ChunkID chunk_id{0}; chunk_id < chunk_count; ++chunk_id) {
-            const auto chunk_in = input_table->get_chunk(chunk_id);
-            const auto base_segment = chunk_in->get_segment(column_id);
-            ChunkOffset chunk_offset{0};
-            segment_iterate<ColumnDataType>(*base_segment, [&](const auto& position) {
+        /*
+        Store unique IDs for equal values in the groupby column (similar to dictionary encoding).
+        The ID 0 is reserved for NULL values. The combined IDs build an AggregateKey for each row.
+        */
+
+        // This time, we have no idea how much space we need, so we take some memory and then rely on the automatic
+        // resizing. The size is quite random, but since single memory allocations do not cost too much, we rather
+        // allocate a bit too much.
+        auto temp_buffer = boost::container::pmr::monotonic_buffer_resource(1'000'000);
+        auto allocator = PolymorphicAllocator<std::pair<const ColumnDataType, AggregateKeyEntry>>{&temp_buffer};
+
+        auto id_map = std::unordered_map<ColumnDataType, AggregateKeyEntry, std::hash<ColumnDataType>, std::equal_to<>,
+                                         decltype(allocator)>(allocator);
+        AggregateKeyEntry id_counter = 1u;
+
+        const auto chunk_count = input_table->chunk_count();
+        for (ChunkID chunk_id{0}; chunk_id < chunk_count; ++chunk_id) {
+          const auto chunk_in = input_table->get_chunk(chunk_id);
+          if (!chunk_in) continue;
+
+          const auto base_segment = chunk_in->get_segment(column_id);
+
+          ChunkOffset chunk_offset{0};
+          segment_iterate<ColumnDataType>(*base_segment, [&](const auto& position) {
+            if (position.is_null()) {
               if constexpr (std::is_same_v<AggregateKey, AggregateKeyEntry>) {
-                // TODO deal with NULL
-                keys_per_chunk[chunk_id][chunk_offset] = position.value();
+                keys_per_chunk[chunk_id][chunk_offset] = 0u;
               } else {
-                keys_per_chunk[chunk_id][chunk_offset][group_column_index] = position.value();
+                keys_per_chunk[chunk_id][chunk_offset][group_column_index] = 0u;
               }
-              ++chunk_offset;
-            });
-          }
-        } else {
-          /*
-          Store unique IDs for equal values in the groupby column (similar to dictionary encoding).
-          The ID 0 is reserved for NULL values. The combined IDs build an AggregateKey for each row.
-          */
-
-          // This time, we have no idea how much space we need, so we take some memory and then rely on the automatic
-          // resizing. The size is quite random, but since single memory allocations do not cost too much, we rather
-          // allocate a bit too much.
-          auto temp_buffer = boost::container::pmr::monotonic_buffer_resource(1'000'000);
-          auto allocator = PolymorphicAllocator<std::pair<const ColumnDataType, AggregateKeyEntry>>{&temp_buffer};
-
-          auto id_map = std::unordered_map<ColumnDataType, AggregateKeyEntry, std::hash<ColumnDataType>, std::equal_to<>,
-                                           decltype(allocator)>(allocator);
-          AggregateKeyEntry id_counter = 1u;
-
-          for (ChunkID chunk_id{0}; chunk_id < chunk_count; ++chunk_id) {
-            const auto chunk_in = input_table->get_chunk(chunk_id);
-            if (!chunk_in) continue;
-
-            const auto base_segment = chunk_in->get_segment(column_id);
-            ChunkOffset chunk_offset{0};
-            segment_iterate<ColumnDataType>(*base_segment, [&](const auto& position) {
-              if (position.is_null()) {
-                if constexpr (std::is_same_v<AggregateKey, AggregateKeyEntry>) {
-                  keys_per_chunk[chunk_id][chunk_offset] = 0u;
-                } else {
-                  keys_per_chunk[chunk_id][chunk_offset][group_column_index] = 0u;
-                }
+            } else {
+              auto inserted = id_map.try_emplace(position.value(), id_counter);
+              // store either the current id_counter or the existing ID of the value
+              if constexpr (std::is_same_v<AggregateKey, AggregateKeyEntry>) {
+                keys_per_chunk[chunk_id][chunk_offset] = inserted.first->second;
               } else {
-                // TODO(anyone): Use string_view here once P0919 (Heterogeneous lookup for unordered containers) has
-                // landed
-                auto inserted = id_map.try_emplace(resolve_temp_type(position.value()), id_counter);  // TODO rename to materialize temp type?
-                // store either the current id_counter or the existing ID of the value
-                if constexpr (std::is_same_v<AggregateKey, AggregateKeyEntry>) {
-                  keys_per_chunk[chunk_id][chunk_offset] = inserted.first->second;
-                } else {
-                  keys_per_chunk[chunk_id][chunk_offset][group_column_index] = inserted.first->second;
-                }
-
-                // if the id_map didn't have the value as a key and a new element was inserted
-                if (inserted.second) ++id_counter;
+                keys_per_chunk[chunk_id][chunk_offset][group_column_index] = inserted.first->second;
               }
 
-              ++chunk_offset;
-            });
-          }
+              // if the id_map didn't have the value as a key and a new element was inserted
+              if (inserted.second) ++id_counter;
+            }
+
+            ++chunk_offset;
+          });
         }
       });
     }));
