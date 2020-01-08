@@ -309,7 +309,30 @@ void AggregateHash::_aggregate() {
                     keys_per_chunk[chunk_id][chunk_offset][group_column_index] = 0u;
                   }
                 } else {
-                  auto inserted = id_map.try_emplace(position.value(), id_counter);
+
+                  const auto& value = position.value();
+
+                  if constexpr (std::is_same_v<ColumnDataType, pmr_string>) {
+                    if (value.length() == 0) {
+                      if constexpr (std::is_same_v<AggregateKey, AggregateKeyEntry>) {
+                        keys_per_chunk[chunk_id][chunk_offset] = uint64_t{0};
+                      } else {
+                        keys_per_chunk[chunk_id][chunk_offset][group_column_index] = uint64_t{0};
+                      }
+                      ++chunk_offset;
+                      return;
+                    } else if (value.length() == 1) {
+                      if constexpr (std::is_same_v<AggregateKey, AggregateKeyEntry>) {
+                        keys_per_chunk[chunk_id][chunk_offset] = static_cast<uint64_t>(value[0]);
+                      } else {
+                        keys_per_chunk[chunk_id][chunk_offset][group_column_index] = static_cast<uint64_t>(value[0]);
+                      }
+                      ++chunk_offset;
+                      return;
+                    }
+                  }
+
+                  auto inserted = id_map.try_emplace(value, id_counter);
                   if constexpr (std::is_same_v<AggregateKey, AggregateKeyEntry>) {
                     keys_per_chunk[chunk_id][chunk_offset] = inserted.first->second;
                   } else {
