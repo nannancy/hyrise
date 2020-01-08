@@ -121,7 +121,7 @@ void AggregateHash::_aggregate_segment(ChunkID chunk_id, ColumnID column_index, 
       const auto value = position.value();
 
       // If we have a value, use the aggregator lambda to update the current aggregate value for this group
-      aggregator(value, result.current_primary_aggregate, result.current_secondary_aggregates);
+      aggregator(resolve_temp_type(value), result.current_primary_aggregate, result.current_secondary_aggregates);  // TODO
 
       // increase value counter
       ++result.aggregate_count;
@@ -286,7 +286,7 @@ void AggregateHash::_aggregate() {
                   keys_per_chunk[chunk_id][chunk_offset][group_column_index] = 0u;
                 }
               } else {
-                auto inserted = id_map.try_emplace(position.value(), id_counter);
+                auto inserted = id_map.try_emplace(resolve_temp_type(position.value()), id_counter);  // TODO test first
 
                 if constexpr (std::is_same_v<AggregateKey, AggregateKeyEntry>) {
                   keys_per_chunk[chunk_id][chunk_offset] = inserted.first->second;
