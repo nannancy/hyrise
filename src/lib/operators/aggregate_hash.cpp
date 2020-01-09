@@ -33,6 +33,7 @@ template <typename ResultIds, typename Results, typename AggregateKey>
 typename Results::reference get_or_add_result(ResultIds& result_ids, Results& results, const AggregateKey& key,
                                               const RowID& row_id) {
   // Get the result id for the current key or add it to the id map
+  // TODO return result_id, retrieve it only once for multiple aggregates
   if constexpr (std::is_same_v<AggregateKey, EmptyAggregateKey>) {
     if (results.empty()) {
       results.emplace_back();
@@ -297,7 +298,7 @@ void AggregateHash::_aggregate() {
 
             auto id_map = std::unordered_map<ColumnDataType, AggregateKeyEntry, std::hash<ColumnDataType>,
                                              std::equal_to<>, decltype(allocator)>(allocator);
-            AggregateKeyEntry id_counter = 1u;
+            AggregateKeyEntry id_counter = uint64_t{2} << 32;
 
             for (ChunkID chunk_id{0}; chunk_id < chunk_count; ++chunk_id) {
               const auto chunk_in = input_table->get_chunk(chunk_id);
@@ -317,19 +318,21 @@ void AggregateHash::_aggregate() {
                   const auto& value = position.value();
 
                   if constexpr (std::is_same_v<ColumnDataType, pmr_string>) {
-                    if (value.length() == 0) {
-                      if constexpr (std::is_same_v<AggregateKey, AggregateKeyEntry>) {
-                        keys_per_chunk[chunk_id][chunk_offset] = uint64_t{0};
-                      } else {
-                        keys_per_chunk[chunk_id][chunk_offset][group_column_index] = uint64_t{0};
+                    if (value.length() < 4) {
+                      // Since \0 is prohibited as part of a database string, the empty string has the immediate ID 1.
+                      auto immediate_id = uint64_t{1};
+
+                      for (auto char_idx = size_t{0}; char_idx < value.length(); ++char_idx) {
+                        // No need to track \0
+                        immediate_id += (value[char_idx] - 1) + (char_idx * 256);
+                        // TODO static_assert that (2 << 32) is ChunkOffset
+                        DebugAssert(immediate_id < (2 << 32), "immediate_id exhausted available space");
                       }
-                      ++chunk_offset;
-                      return;
-                    } else if (value.length() == 1) {
+
                       if constexpr (std::is_same_v<AggregateKey, AggregateKeyEntry>) {
-                        keys_per_chunk[chunk_id][chunk_offset] = static_cast<uint64_t>(value[0]);
+                        keys_per_chunk[chunk_id][chunk_offset] = immediate_id;
                       } else {
-                        keys_per_chunk[chunk_id][chunk_offset][group_column_index] = static_cast<uint64_t>(value[0]);
+                        keys_per_chunk[chunk_id][chunk_offset][group_column_index] = immediate_id;
                       }
                       ++chunk_offset;
                       return;
@@ -439,6 +442,7 @@ void AggregateHash::_aggregate() {
       }
     } else {
       ColumnID column_index{0};
+
       for (const auto& aggregate : _aggregates) {
         /**
          * Special COUNT(*) implementation.

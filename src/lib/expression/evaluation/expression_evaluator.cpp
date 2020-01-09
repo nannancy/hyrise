@@ -986,7 +986,7 @@ std::shared_ptr<const Table> ExpressionEvaluator::_evaluate_subquery_expression_
 std::shared_ptr<BaseValueSegment> ExpressionEvaluator::evaluate_expression_to_segment(
     const AbstractExpression& expression) {
   std::shared_ptr<BaseValueSegment> segment;
-  std::vector<bool> nulls;
+  std::vector<bool> nulls;  // TODO change to pmr_vector? Here and in other placss
 
   _resolve_to_expression_result_view(expression, [&](const auto& view) {
     using ColumnDataType = typename std::decay_t<decltype(view)>::Type;
