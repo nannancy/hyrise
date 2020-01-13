@@ -35,8 +35,8 @@ class BitMagicVector : public CompressedVector<BitMagicVector> {
   auto on_end() const { return _data.end(); }
 
   std::unique_ptr<const BaseCompressedVector> on_copy_using_allocator(const PolymorphicAllocator<size_t>& alloc) const {
-    auto data_copy = pmr_vector{_data, alloc};
-    return std::make_unique<BitMagicVector>(std::move(data_copy));
+    Fail("not implemented"); // TODO - is this tested?
+    return nullptr;
   }
 
  private:
