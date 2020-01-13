@@ -5,6 +5,7 @@
 #include <bm.h> // not bm64
 #include <bmsparsevec.h>
 
+#include "bit_magic_decompressor.hpp"
 #include "storage/vector_compression/base_compressed_vector.hpp"
 #include "types.hpp"
 
