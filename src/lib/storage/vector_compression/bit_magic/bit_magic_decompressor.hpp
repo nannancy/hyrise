@@ -6,7 +6,6 @@
 
 namespace opossum {
 
-template <typename UnsignedIntType>
 class BitMagicDecompressor : public BaseVectorDecompressor {
  public:
   explicit BitMagicDecompressor(const bm::sparse_vector<uint32_t, bm::bvector<>>& data) : _data{data} {}
