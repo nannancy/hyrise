@@ -37,6 +37,7 @@ enum class CompressedVectorType : uint8_t {
 template <typename T>
 class FixedSizeByteAlignedVector;
 class SimdBp128Vector;
+class BitMagicVector;
 
 /**
  * Mapping of compressed vector types to compressed vectors
