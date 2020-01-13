@@ -89,7 +89,8 @@ class FrameOfReferenceSegmentIterable : public PointAccessibleSegmentIterable<Fr
     }
 
     void decrement() {
-      --_offset_value_it;
+Fail("disabled");
+      //--_offset_value_it;
       --_null_value_it;
       --_chunk_offset;
 
@@ -114,9 +115,9 @@ class FrameOfReferenceSegmentIterable : public PointAccessibleSegmentIterable<Fr
       }
     }
 
-    bool equal(const Iterator& other) const { return _offset_value_it == other._offset_value_it; }
+    bool equal(const Iterator& other) const { return _null_value_it == other._null_value_it; }
 
-    std::ptrdiff_t distance_to(const Iterator& other) const { return other._offset_value_it - _offset_value_it; }
+    std::ptrdiff_t distance_to(const Iterator& other) const { return other._null_value_it - _null_value_it; }
 
     SegmentPosition<T> dereference() const {
       const auto value = static_cast<T>(*_offset_value_it) + *_block_minimum_it;

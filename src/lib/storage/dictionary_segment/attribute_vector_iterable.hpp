@@ -63,14 +63,19 @@ class AttributeVectorIterable : public PointAccessibleSegmentIterable<AttributeV
     }
 
     void decrement() {
-      --_attribute_it;
-      --_chunk_offset;
+Fail("disabled");
+//      --_attribute_it;
+//      --_chunk_offset;
     }
 
     bool equal(const Iterator& other) const { return _attribute_it == other._attribute_it; }
 
     void advance(std::ptrdiff_t n) {
-      _attribute_it += n;
+      if constexpr (std::is_same_v<std::decay_t<ZsIteratorType>, bm::sparse_vector<uint32_t, bm::bvector<>>::const_iterator>) {
+        for (auto i = 0; i < n; ++i) ++_attribute_it;
+      } else {
+        _attribute_it += n;
+      }
       _chunk_offset += n;
     }
 
