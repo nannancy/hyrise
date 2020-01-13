@@ -24,11 +24,11 @@ class BitMagicVector : public CompressedVector<BitMagicVector> {
   size_t on_size() const { return _data.size(); }
   size_t on_data_size() const { return 0; }  // TODO
 
-  auto on_create_base_decompressor() const { return std::unique_ptr<BaseVectorDecompressor>{on_create_decompressor()}; }
-
   auto on_create_decompressor() const {
     return std::make_unique<BitMagicDecompressor>(_data);
   }
+
+  auto on_create_base_decompressor() const { return std::unique_ptr<BaseVectorDecompressor>{on_create_decompressor()}; }
 
   auto on_begin() const { return _data.begin(); }
 
