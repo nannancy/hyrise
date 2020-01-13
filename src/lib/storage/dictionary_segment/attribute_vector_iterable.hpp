@@ -74,7 +74,7 @@ class AttributeVectorIterable : public PointAccessibleSegmentIterable<AttributeV
       _chunk_offset += n;
     }
 
-    std::ptrdiff_t distance_to(const Iterator& other) const { return other._attribute_it - _attribute_it; }
+    std::ptrdiff_t distance_to(const Iterator& other) const { return other._chunk_offset - _chunk_offset; }
 
     SegmentPosition<ValueID> dereference() const {
       const auto value_id = static_cast<ValueID>(*_attribute_it);
