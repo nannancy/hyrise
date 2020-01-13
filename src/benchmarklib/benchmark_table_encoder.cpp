@@ -32,6 +32,8 @@ SegmentEncodingSpec get_segment_encoding_spec(const BaseEncodedSegment& base_enc
         return {base_encoded_segment.encoding_type(), VectorCompressionType::FixedSizeByteAligned};
       case CompressedVectorType::SimdBp128:
         return {base_encoded_segment.encoding_type(), VectorCompressionType::SimdBp128};
+      case CompressedVectorType::BitMagic:
+        Fail("not implemented");
     }
 
     Fail("Invalid enum value");

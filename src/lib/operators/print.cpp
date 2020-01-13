@@ -238,6 +238,10 @@ std::string Print::_segment_type(const std::shared_ptr<BaseSegment>& segment) {
           segment_type += ":BP";
           break;
         }
+        case CompressedVectorType::BitMagic: {
+          segment_type += ":BM";
+          break;
+        }
       }
     }
   } else {

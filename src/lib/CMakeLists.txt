@@ -511,6 +511,10 @@ set(
     storage/vector_compression/base_compressed_vector.hpp
     storage/vector_compression/base_vector_compressor.hpp
     storage/vector_compression/base_vector_decompressor.hpp
+    storage/vector_compression/bit_magic/bit_magic_compressor.cpp
+    storage/vector_compression/bit_magic/bit_magic_compressor.hpp
+    storage/vector_compression/bit_magic/bit_magic_decompressor.hpp
+    storage/vector_compression/bit_magic/bit_magic_vector.hpp
     storage/vector_compression/compressed_vector_type.hpp
     storage/vector_compression/fixed_size_byte_aligned/fixed_size_byte_aligned_compressor.cpp
     storage/vector_compression/fixed_size_byte_aligned/fixed_size_byte_aligned_compressor.hpp
@@ -599,6 +603,7 @@ set(
     sqlparser
     cqf
     uninitialized_vector
+    bit_magic
     lz4
     zstd
     ${Boost_CONTAINER_LIBRARY}

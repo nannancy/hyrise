@@ -30,7 +30,8 @@ enum class CompressedVectorType : uint8_t {
   FixedSize4ByteAligned,  // uncompressed
   FixedSize2ByteAligned,
   FixedSize1ByteAligned,
-  SimdBp128
+  SimdBp128,
+  BitMagic
 };
 
 template <typename T>

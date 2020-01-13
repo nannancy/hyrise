@@ -317,16 +317,19 @@ add_library(tpcds_dbgen
   ${TPCDS_KIT_DIR}/w_web_page.c
   ${TPCDS_KIT_DIR}/w_web_returns.c
   ${TPCDS_KIT_DIR}/w_web_sales.c
-  ${TPCDS_KIT_DIR}/w_web_site.c)
+  ${TPCDS_KIT_DIR}/w_web_site.c
+)
 
 target_include_directories(tpcds_dbgen
   PUBLIC
-  ${CMAKE_CURRENT_SOURCE_DIR})
+  ${CMAKE_CURRENT_SOURCE_DIR}
+)
 
 target_compile_definitions(
   tpcds_dbgen
   PUBLIC
-  -DLINUX)
+  -DLINUX
+)
 
 target_compile_options(
   tpcds_dbgen
@@ -346,3 +349,50 @@ target_compile_options(
   -Wno-parentheses-equality
 )
 endif()
+
+add_library(bit_magic INTERFACE)
+target_include_directories(bit_magic INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/BitMagic/src/)
+add_compile_options("-DBMAVX2OPT")
+target_sources(bit_magic
+  INTERFACE
+  ${CMAKE_CURRENT_SOURCE_DIR}/BitMagic/src/bm.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/BitMagic/src/bm64.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/BitMagic/src/bmaggregator.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/BitMagic/src/bmalgo.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/BitMagic/src/bmalgo_impl.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/BitMagic/src/bmalgo_similarity.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/BitMagic/src/bmalloc.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/BitMagic/src/bmavx2.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/BitMagic/src/bmavx512.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/BitMagic/src/bmblocks.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/BitMagic/src/bmbmatrix.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/BitMagic/src/bmbmi1.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/BitMagic/src/bmbmi2.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/BitMagic/src/bmbuffer.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/BitMagic/src/bmconst.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/BitMagic/src/bmdbg.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/BitMagic/src/bmdef.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/BitMagic/src/bmfunc.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/BitMagic/src/bmfwd.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/BitMagic/src/bmgamma.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/BitMagic/src/bmrandom.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/BitMagic/src/bmrs.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/BitMagic/src/bmserial.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/BitMagic/src/bmsimd.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/BitMagic/src/bmsparsevec.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/BitMagic/src/bmsparsevec_algo.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/BitMagic/src/bmsparsevec_compr.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/BitMagic/src/bmsparsevec_serial.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/BitMagic/src/bmsparsevec_util.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/BitMagic/src/bmsse2.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/BitMagic/src/bmsse4.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/BitMagic/src/bmsse_util.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/BitMagic/src/bmstrsparsevec.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/BitMagic/src/bmtimer.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/BitMagic/src/bmtrans.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/BitMagic/src/bmundef.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/BitMagic/src/bmutil.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/BitMagic/src/bmvmin.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/BitMagic/src/bmxor.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/BitMagic/src/encoding.h
+)
