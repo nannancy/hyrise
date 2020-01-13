@@ -12,11 +12,7 @@ namespace opossum {
 
 namespace hana = boost::hana;
 
-/**
- * @brief Stores values as either uint32_t, uint16_t, or uint8_t
- *
- * This is simplest vector compression scheme. It matches the old FittedAttributeVector
- */
+// TODO doc
 class BitMagicVector : public CompressedVector<BitMagicVector> {
 
  public:
@@ -25,7 +21,7 @@ class BitMagicVector : public CompressedVector<BitMagicVector> {
 
  public:
   size_t on_size() const { return _data.size(); }
-  size_t on_data_size() const { return sizeof(UnsignedIntType) * _data.size(); }
+  size_t on_data_size() const { return 0; }  // TODO
 
   auto on_create_base_decompressor() const { return std::unique_ptr<BaseVectorDecompressor>{on_create_decompressor()}; }
 
@@ -33,9 +29,9 @@ class BitMagicVector : public CompressedVector<BitMagicVector> {
     return std::make_unique<BitMagicDecompressor>(_data);
   }
 
-  auto on_begin() const { return _data.cbegin(); }
+  auto on_begin() const { return _data.begin(); }
 
-  auto on_end() const { return _data.cend(); }
+  auto on_end() const { return _data.end(); }
 
   std::unique_ptr<const BaseCompressedVector> on_copy_using_allocator(const PolymorphicAllocator<size_t>& alloc) const {
     auto data_copy = pmr_vector{_data, alloc};

@@ -351,7 +351,7 @@ target_compile_options(
 endif()
 
 add_library(bit_magic INTERFACE)
-target_include_directories(bit_magic INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/BitMagic/src/)
+target_include_directories(bit_magic SYSTEM INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/BitMagic/src/)
 add_compile_options("-DBMAVX2OPT")
 target_sources(bit_magic
   INTERFACE
