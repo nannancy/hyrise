@@ -26,6 +26,14 @@ std::unique_ptr<BaseCompressedVector> BitMagicCompressor::_compress_using_max_va
   {
     BM_DECLARE_TEMP_BLOCK(tb)  // TODO can we do without a macro here
     bm_vector.optimize(tb); // TODO play around with optimization levels
+
+    // compute bit-vector statistics
+    bm::bvector<>::statistics st;
+    bm_vector.calc_stat(&st);
+
+    std::cout << "Bit-vector statistics: GAP (compressed blocks)=" << st.gap_blocks
+              << ", BIT (uncompressed blocks)=" << st.bit_blocks
+              << std::endl << std::endl;
   }
 
   return std::make_unique<BitMagicVector>(std::move(bm_vector));
