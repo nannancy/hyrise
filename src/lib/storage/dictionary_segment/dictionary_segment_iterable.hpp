@@ -78,12 +78,14 @@ class DictionarySegmentIterable : public PointAccessibleSegmentIterable<Dictiona
     }
 
     void decrement() {
-      --_attribute_it;
+Fail("disabled");
+//      --_attribute_it;
       --_chunk_offset;
     }
 
     void advance(std::ptrdiff_t n) {
-      _attribute_it += n;
+Fail("disabled");
+//      _attribute_it += n;
       _chunk_offset += n;
     }
 
