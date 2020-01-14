@@ -21,6 +21,7 @@
 #include "utils/aligned_size.hpp"
 #include "utils/assert.hpp"
 #include "utils/performance_warning.hpp"
+#include "utils/timer.hpp"
 
 namespace {
 using namespace opossum;  // NOLINT
@@ -123,12 +124,12 @@ struct AggregateContext : public AggregateResultContext<ColumnDataType, Aggregat
   std::unique_ptr<AggregateResultIdMap<AggregateKey>> result_ids;
 };
 
-template <typename ColumnDataType, AggregateFunction function, typename AggregateKey>
+template <typename ColumnDataType, AggregateFunction function, typename AggregateKey, bool Nullable>
 void AggregateHash::_aggregate_segment(ChunkID chunk_id, ColumnID column_index, const BaseSegment& base_segment,
                                        const KeysPerChunk<AggregateKey>& keys_per_chunk) {
   using AggregateType = typename AggregateTraits<ColumnDataType, function>::AggregateType;
 
-  auto aggregator = AggregateFunctionBuilder<ColumnDataType, AggregateType, function>().get_aggregate_function();
+  auto aggregator = AggregateFunctionBuilder<ColumnDataType, AggregateType, function, Nullable>().get_aggregate_function();
 
   auto& context = *std::static_pointer_cast<AggregateContext<ColumnDataType, AggregateType, AggregateKey>>(
       _contexts_per_column[column_index]);
@@ -146,12 +147,14 @@ void AggregateHash::_aggregate_segment(ChunkID chunk_id, ColumnID column_index, 
     /**
     * If the value is NULL, the current aggregate value does not change.
     */
-    if (!position.is_null()) {
+    if (!Nullable || !position.is_null()) {
       // If we have a value, use the aggregator lambda to update the current aggregate value for this group
       aggregator(position.value(), result.current_primary_aggregate, result.current_secondary_aggregates);
 
-      // increase value counter
-      ++result.aggregate_count;
+      if constexpr (function == AggregateFunction::Avg || function == AggregateFunction::Count || function == AggregateFunction::StandardDeviationSample) {
+        // increase value counter
+        ++result.aggregate_count;
+      }
 
       if constexpr (function == AggregateFunction::CountDistinct) {  // NOLINT
         // clang-tidy error: https://bugs.llvm.org/show_bug.cgi?id=35824
@@ -173,6 +176,7 @@ void AggregateHash::_aggregate() {
   // reallocations, this might make less sense.
   // We use boost over std because libc++ does not yet (July 2018) support monotonic_buffer_resource:
   // https://libcxx.llvm.org/ts1z_status.html
+  Timer t;
   using AggregateKeysAllocator =
       boost::container::scoped_allocator_adaptor<PolymorphicAllocator<AggregateKeys<AggregateKey>>>;
 
@@ -483,35 +487,35 @@ void AggregateHash::_aggregate() {
 
           switch (aggregate.function) {
             case AggregateFunction::Min:
-              _aggregate_segment<ColumnDataType, AggregateFunction::Min, AggregateKey>(chunk_id, column_index,
+              _aggregate_segment<ColumnDataType, AggregateFunction::Min, AggregateKey, false>(chunk_id, column_index,
                                                                                        *base_segment, keys_per_chunk);
               break;
             case AggregateFunction::Max:
-              _aggregate_segment<ColumnDataType, AggregateFunction::Max, AggregateKey>(chunk_id, column_index,
+              _aggregate_segment<ColumnDataType, AggregateFunction::Max, AggregateKey, false>(chunk_id, column_index,
                                                                                        *base_segment, keys_per_chunk);
               break;
             case AggregateFunction::Sum:
-              _aggregate_segment<ColumnDataType, AggregateFunction::Sum, AggregateKey>(chunk_id, column_index,
+              _aggregate_segment<ColumnDataType, AggregateFunction::Sum, AggregateKey, false>(chunk_id, column_index,
                                                                                        *base_segment, keys_per_chunk);
               break;
             case AggregateFunction::Avg:
-              _aggregate_segment<ColumnDataType, AggregateFunction::Avg, AggregateKey>(chunk_id, column_index,
+              _aggregate_segment<ColumnDataType, AggregateFunction::Avg, AggregateKey, false>(chunk_id, column_index,
                                                                                        *base_segment, keys_per_chunk);
               break;
             case AggregateFunction::Count:
-              _aggregate_segment<ColumnDataType, AggregateFunction::Count, AggregateKey>(chunk_id, column_index,
+              _aggregate_segment<ColumnDataType, AggregateFunction::Count, AggregateKey, false>(chunk_id, column_index,
                                                                                          *base_segment, keys_per_chunk);
               break;
             case AggregateFunction::CountDistinct:
-              _aggregate_segment<ColumnDataType, AggregateFunction::CountDistinct, AggregateKey>(
+              _aggregate_segment<ColumnDataType, AggregateFunction::CountDistinct, AggregateKey, false>(
                   chunk_id, column_index, *base_segment, keys_per_chunk);
               break;
             case AggregateFunction::StandardDeviationSample:
-              _aggregate_segment<ColumnDataType, AggregateFunction::StandardDeviationSample, AggregateKey>(
+              _aggregate_segment<ColumnDataType, AggregateFunction::StandardDeviationSample, AggregateKey, false>(
                   chunk_id, column_index, *base_segment, keys_per_chunk);
               break;
             case AggregateFunction::Any:
-              _aggregate_segment<ColumnDataType, AggregateFunction::Any, AggregateKey>(chunk_id, column_index,
+              _aggregate_segment<ColumnDataType, AggregateFunction::Any, AggregateKey, false>(chunk_id, column_index,
                                                                                        *base_segment, keys_per_chunk);
           }
         });

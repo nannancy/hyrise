@@ -30,19 +30,19 @@ The AggregateFunctionBuilder is used to create the lambda function that will be 
 the AggregateVisitor. It is a separate class because methods cannot be partially specialized.
 Therefore, we partially specialize the whole class and define the get_aggregate_function anew every time.
 */
-template <typename ColumnDataType, typename AggregateType, AggregateFunction function>
+template <typename ColumnDataType, typename AggregateType, AggregateFunction function, bool Nullable = true>
 class AggregateFunctionBuilder {
  public:
   void get_aggregate_function() { Fail("Invalid aggregate function"); }
 };
 
-template <typename ColumnDataType, typename AggregateType>
-class AggregateFunctionBuilder<ColumnDataType, AggregateType, AggregateFunction::Min> {
+template <typename ColumnDataType, typename AggregateType, bool Nullable>
+class AggregateFunctionBuilder<ColumnDataType, AggregateType, AggregateFunction::Min, Nullable> {
  public:
   auto get_aggregate_function() {
     return [](const ColumnDataType& new_value, std::optional<AggregateType>& current_primary_aggregate,
               std::vector<AggregateType>& current_secondary_aggregates) {
-      if (!current_primary_aggregate || value_smaller(new_value, *current_primary_aggregate)) {
+      if ((!Nullable || !current_primary_aggregate) || value_smaller(new_value, *current_primary_aggregate)) {
         // New minimum found
         current_primary_aggregate = new_value;
       }
@@ -50,13 +50,13 @@ class AggregateFunctionBuilder<ColumnDataType, AggregateType, AggregateFunction:
   }
 };
 
-template <typename ColumnDataType, typename AggregateType>
-class AggregateFunctionBuilder<ColumnDataType, AggregateType, AggregateFunction::Max> {
+template <typename ColumnDataType, typename AggregateType, bool Nullable>
+class AggregateFunctionBuilder<ColumnDataType, AggregateType, AggregateFunction::Max, Nullable> {
  public:
   auto get_aggregate_function() {
     return [](const ColumnDataType& new_value, std::optional<AggregateType>& current_primary_aggregate,
               std::vector<AggregateType>& current_secondary_aggregates) {
-      if (!current_primary_aggregate || value_greater(new_value, *current_primary_aggregate)) {
+      if ((!Nullable || !current_primary_aggregate) || value_greater(new_value, *current_primary_aggregate)) {
         // New maximum found
         current_primary_aggregate = new_value;
       }
@@ -64,14 +64,14 @@ class AggregateFunctionBuilder<ColumnDataType, AggregateType, AggregateFunction:
   }
 };
 
-template <typename ColumnDataType, typename AggregateType>
-class AggregateFunctionBuilder<ColumnDataType, AggregateType, AggregateFunction::Sum> {
+template <typename ColumnDataType, typename AggregateType, bool Nullable>
+class AggregateFunctionBuilder<ColumnDataType, AggregateType, AggregateFunction::Sum, Nullable> {
  public:
   auto get_aggregate_function() {
     return [](const ColumnDataType& new_value, std::optional<AggregateType>& current_primary_aggregate,
               std::vector<AggregateType>& current_secondary_aggregates) {
       // add new value to sum
-      if (current_primary_aggregate) {
+      if (!Nullable || current_primary_aggregate) {
         *current_primary_aggregate += new_value;
       } else {
         current_primary_aggregate = new_value;
@@ -80,8 +80,8 @@ class AggregateFunctionBuilder<ColumnDataType, AggregateType, AggregateFunction:
   }
 };
 
-template <typename ColumnDataType, typename AggregateType>
-class AggregateFunctionBuilder<ColumnDataType, AggregateType, AggregateFunction::Avg> {
+template <typename ColumnDataType, typename AggregateType, bool Nullable>
+class AggregateFunctionBuilder<ColumnDataType, AggregateType, AggregateFunction::Avg, Nullable> {
  public:
   auto get_aggregate_function() {
     /*
@@ -89,12 +89,12 @@ class AggregateFunctionBuilder<ColumnDataType, AggregateType, AggregateFunction:
      * To get the average, the aggregate operator needs to count the number of elements contributing to this sum,
      * and divide the final sum by that number.
      */
-    return AggregateFunctionBuilder<ColumnDataType, AggregateType, AggregateFunction::Sum>{}.get_aggregate_function();
+    return AggregateFunctionBuilder<ColumnDataType, AggregateType, AggregateFunction::Sum, Nullable>{}.get_aggregate_function();
   }
 };
 
-template <typename ColumnDataType, typename AggregateType>
-class AggregateFunctionBuilder<ColumnDataType, AggregateType, AggregateFunction::StandardDeviationSample> {
+template <typename ColumnDataType, typename AggregateType, bool Nullable>
+class AggregateFunctionBuilder<ColumnDataType, AggregateType, AggregateFunction::StandardDeviationSample, Nullable> {
  public:
   auto get_aggregate_function() {
     return [](const ColumnDataType& new_value, std::optional<AggregateType>& current_primary_aggregate,
@@ -140,8 +140,8 @@ class AggregateFunctionBuilder<ColumnDataType, AggregateType, AggregateFunction:
   }
 };
 
-template <typename ColumnDataType, typename AggregateType>
-class AggregateFunctionBuilder<ColumnDataType, AggregateType, AggregateFunction::Any> {
+template <typename ColumnDataType, typename AggregateType, bool Nullable>
+class AggregateFunctionBuilder<ColumnDataType, AggregateType, AggregateFunction::Any, Nullable> {
  public:
   auto get_aggregate_function() {
     return [](const ColumnDataType& new_value, std::optional<AggregateType>& current_primary_aggregate,
@@ -154,8 +154,8 @@ class AggregateFunctionBuilder<ColumnDataType, AggregateType, AggregateFunction:
   }
 };
 
-template <typename ColumnDataType, typename AggregateType>
-class AggregateFunctionBuilder<ColumnDataType, AggregateType, AggregateFunction::Count> {
+template <typename ColumnDataType, typename AggregateType, bool Nullable>
+class AggregateFunctionBuilder<ColumnDataType, AggregateType, AggregateFunction::Count, Nullable> {
  public:
   auto get_aggregate_function() {
     return [](const ColumnDataType&, std::optional<AggregateType>& current_primary_aggregate,
@@ -163,8 +163,8 @@ class AggregateFunctionBuilder<ColumnDataType, AggregateType, AggregateFunction:
   }
 };
 
-template <typename ColumnDataType, typename AggregateType>
-class AggregateFunctionBuilder<ColumnDataType, AggregateType, AggregateFunction::CountDistinct> {
+template <typename ColumnDataType, typename AggregateType, bool Nullable>
+class AggregateFunctionBuilder<ColumnDataType, AggregateType, AggregateFunction::CountDistinct, Nullable> {
  public:
   auto get_aggregate_function() {
     return [](const ColumnDataType&, std::optional<AggregateType>& current_primary_aggregate,

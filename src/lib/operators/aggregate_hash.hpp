@@ -125,7 +125,7 @@ class AggregateHash : public AbstractAggregateOperator {
 
   void _write_groupby_output(PosList& pos_list);
 
-  template <typename ColumnDataType, AggregateFunction function, typename AggregateKey>
+  template <typename ColumnDataType, AggregateFunction function, typename AggregateKey, bool Nullable>
   void _aggregate_segment(ChunkID chunk_id, ColumnID column_index, const BaseSegment& base_segment,
                           const KeysPerChunk<AggregateKey>& keys_per_chunk);
 
