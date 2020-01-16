@@ -208,7 +208,7 @@ template <typename T, typename HashedType, bool retain_null_values, JoinBloomFil
 RadixContainer<T> materialize_input(const std::shared_ptr<const Table>& in_table, ColumnID column_id,
                                     const std::vector<size_t>& chunk_offsets,
                                     std::vector<std::vector<size_t>>& histograms, const size_t radix_bits, std::vector<bool>& bloom_filter) {
-  if (bloom_filter_mode == JoinBloomFilterMode::Build | bloom_filter_mode == JoinBloomFilterMode::Unused) {
+  if (bloom_filter_mode == JoinBloomFilterMode::Build || bloom_filter_mode == JoinBloomFilterMode::Unused) {
     DebugAssert(bloom_filter.empty(), "An empty bloom_filter must be passed in build/unused mode");
   } else if (bloom_filter_mode == JoinBloomFilterMode::Probe) {
     DebugAssert(!bloom_filter.empty(), "A filled bloom_filter must be passed in probe mode");
@@ -416,7 +416,7 @@ std::vector<std::optional<PosHashTable<HashedType>>> build(const RadixContainer<
                ++partition_offset) {
             auto& element = build_partition[partition_offset];
 
-            if (element.row_id == NULL_ROW_ID || element.skip) {
+            if (element.row_id == NULL_ROW_ID || element.skip) {  // TODO also skip build for elements not seen on probe side
               // Skip initialized PartitionedElements that might remain after materialization phase.
               continue;
             }
@@ -463,9 +463,7 @@ RadixContainer<T> partition_radix_parallel(const RadixContainer<T>& radix_contai
   output->resize(container_elements.size());
 
   [[maybe_unused]] auto output_nulls = std::make_shared<std::vector<bool>>();
-  if constexpr (retain_null_values) {
-    output_nulls->resize(null_value_bitvector.size());
-  }
+
 
   RadixContainer<T> radix_output;
   radix_output.elements = output;
