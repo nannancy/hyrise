@@ -36,6 +36,7 @@ template <typename T>
 struct PartitionedElement {
   RowID row_id;
   T value;
+  bool skip{false};
 };
 
 // Initializing the partition vector takes some time. This is not necessary, because it will be overwritten anyway.
@@ -197,10 +198,22 @@ inline std::vector<size_t> determine_chunk_offsets(const std::shared_ptr<const T
   return chunk_offsets;
 }
 
-template <typename T, typename HashedType, bool retain_null_values>
+enum class JoinBloomFilterMode {
+  Unused,
+  Build,
+  Probe
+};
+
+template <typename T, typename HashedType, bool retain_null_values, JoinBloomFilterMode bloom_filter_mode>
 RadixContainer<T> materialize_input(const std::shared_ptr<const Table>& in_table, ColumnID column_id,
                                     const std::vector<size_t>& chunk_offsets,
-                                    std::vector<std::vector<size_t>>& histograms, const size_t radix_bits) {
+                                    std::vector<std::vector<size_t>>& histograms, const size_t radix_bits, std::vector<bool>& bloom_filter) {
+  if (bloom_filter_mode == JoinBloomFilterMode::Build | bloom_filter_mode == JoinBloomFilterMode::Unused) {
+    DebugAssert(bloom_filter.empty(), "An empty bloom_filter must be passed in build/unused mode");
+  } else if (bloom_filter_mode == JoinBloomFilterMode::Probe) {
+    DebugAssert(!bloom_filter.empty(), "A filled bloom_filter must be passed in probe mode");
+  }
+
   // Retrieve input row_count as it might change during execution if we work on a non-reference table
   auto row_count = in_table->row_count();
 
@@ -221,10 +234,19 @@ RadixContainer<T> materialize_input(const std::shared_ptr<const Table>& in_table
 
   // currently, we just do one pass
   size_t pass = 0;
-  size_t mask = static_cast<uint32_t>(pow(2, radix_bits * (pass + 1)) - 1);
+  size_t radix_mask = static_cast<uint32_t>(pow(2, radix_bits * (pass + 1)) - 1);
 
   // create histograms per chunk
   histograms.resize(chunk_count);
+
+  constexpr auto bloom_filter_bits = 8;  // TODO
+  constexpr auto bloom_filter_size = 1 << bloom_filter_bits;
+  constexpr auto bloom_filter_mask = bloom_filter_size - 1;
+  auto chunk_bloom_filters = std::vector<std::vector<bool>>{};
+  if (bloom_filter_mode == JoinBloomFilterMode::Build) {
+    chunk_bloom_filters.resize(chunk_count);
+    bloom_filter.resize(bloom_filter_size);
+  }
 
   std::vector<std::shared_ptr<AbstractTask>> jobs;
   jobs.reserve(chunk_count);
@@ -240,6 +262,11 @@ RadixContainer<T> materialize_input(const std::shared_ptr<const Table>& in_table
       auto output_offset = chunk_offsets[chunk_id];
       auto output_iterator = elements->begin() + output_offset;
       auto segment = chunk_in->get_segment(column_id);
+
+      auto& chunk_bloom_filter = chunk_bloom_filters[chunk_id];
+      if constexpr (bloom_filter_mode == JoinBloomFilterMode::Build) {
+        chunk_bloom_filter.resize(bloom_filter_size);
+      }
 
       [[maybe_unused]] auto null_value_bitvector_iterator = null_value_bitvector->begin();
       if constexpr (retain_null_values) {
@@ -264,15 +291,33 @@ RadixContainer<T> materialize_input(const std::shared_ptr<const Table>& in_table
           ++it;
 
           if (!value.is_null() || retain_null_values) {
+            // TODO(anyone): static_cast is almost always safe, since HashType is big enough. Only for double-vs-long
+            // joins an information loss is possible when joining with longs that cannot be losslessly converted to
+            // double
+
+            const Hash hashed_value = hash_function(static_cast<HashedType>(value.value()));
+            auto skip = false;
+
+            if (!value.is_null()) {
+              const auto bloom_filter_value = hashed_value & bloom_filter_mask;
+              if constexpr (bloom_filter_mode == JoinBloomFilterMode::Build) {
+                chunk_bloom_filter[bloom_filter_value] = true;
+              } else if constexpr (bloom_filter_mode == JoinBloomFilterMode::Probe) {
+                if (!bloom_filter[bloom_filter_value]) {
+                  skip = true;
+                }
+              }
+            }
+
             /*
             For ReferenceSegments we do not use the RowIDs from the referenced tables.
             Instead, we use the index in the ReferenceSegment itself. This way we can later correctly dereference
             values from different inputs (important for Multi Joins).
             */
             if constexpr (is_reference_segment_iterable_v<IterableType>) {
-              *(output_iterator++) = PartitionedElement<T>{RowID{chunk_id, reference_chunk_offset}, value.value()};
+              *(output_iterator++) = PartitionedElement<T>{RowID{chunk_id, reference_chunk_offset}, value.value(), skip};
             } else {
-              *(output_iterator++) = PartitionedElement<T>{RowID{chunk_id, value.chunk_offset()}, value.value()};
+              *(output_iterator++) = PartitionedElement<T>{RowID{chunk_id, value.chunk_offset()}, value.value(), skip};
             }
 
             // In case we care about NULL values, store the NULL flag
@@ -284,11 +329,7 @@ RadixContainer<T> materialize_input(const std::shared_ptr<const Table>& in_table
             }
 
             if (radix_bits > 0) {
-              // TODO(anyone): static_cast is almost always safe, since HashType is big enough. Only for double-vs-long
-              // joins an information loss is possible when joining with longs that cannot be losslessly converted to
-              // double
-              const Hash hashed_value = hash_function(static_cast<HashedType>(value.value()));
-              const Hash radix = hashed_value & mask;
+              const Hash radix = hashed_value & radix_mask;
               ++histogram[radix];
             }
 
@@ -308,8 +349,9 @@ RadixContainer<T> materialize_input(const std::shared_ptr<const Table>& in_table
       });
 
       if constexpr (std::is_same_v<Partition<T>, uninitialized_vector<PartitionedElement<T>>>) {  // NOLINT
-        // Because the vector is uninitialized, we need to manually fill up all slots that we did not use because the
-        // input values were NULL.
+        // Because the vector is uninitialized, we need to either remove or manually fill up all slots that we did not
+        // use because the input values were NULL or because the bloom filter had a miss.
+        // TODO replace elements with vector of vectors so that we can simply resize it
 
         Assert(output_iterator <= elements->end(), "output_iterator has written past the end");
         auto output_offset_end = chunk_id < chunk_offsets.size() - 1 ? chunk_offsets[chunk_id + 1] : elements->size();
@@ -325,6 +367,12 @@ RadixContainer<T> materialize_input(const std::shared_ptr<const Table>& in_table
     jobs.back()->schedule();
   }
   Hyrise::get().scheduler()->wait_for_tasks(jobs);
+
+  for (auto& chunk_bloom_filter : chunk_bloom_filters) {
+    for (auto bloom_filter_idx = size_t{0}; bloom_filter_idx < bloom_filter_size; ++bloom_filter_idx) {
+      bloom_filter[bloom_filter_idx] = bloom_filter[bloom_filter_idx] || chunk_bloom_filter[bloom_filter_idx];
+    }
+  }
 
   return RadixContainer<T>{elements, std::vector<size_t>{elements->size()}, null_value_bitvector};
 }
@@ -368,7 +416,7 @@ std::vector<std::optional<PosHashTable<HashedType>>> build(const RadixContainer<
                ++partition_offset) {
             auto& element = build_partition[partition_offset];
 
-            if (element.row_id == NULL_ROW_ID) {
+            if (element.row_id == NULL_ROW_ID || element.skip) {
               // Skip initialized PartitionedElements that might remain after materialization phase.
               continue;
             }
@@ -408,7 +456,7 @@ RadixContainer<T> partition_radix_parallel(const RadixContainer<T>& radix_contai
 
   // currently, we just do one pass
   size_t pass = 0;
-  size_t mask = static_cast<uint32_t>(pow(2, radix_bits * (pass + 1)) - 1);
+  size_t radix_mask = static_cast<uint32_t>(pow(2, radix_bits * (pass + 1)) - 1);
 
   // allocate new (shared) output
   auto output = std::make_shared<Partition<T>>();
@@ -501,6 +549,8 @@ RadixContainer<T> partition_radix_parallel(const RadixContainer<T>& radix_contai
       for (size_t chunk_offset = input_offset; chunk_offset < input_offset + input_size; ++chunk_offset) {
         const auto& element = container_elements[chunk_offset];
 
+        if (element.skip) continue;
+
         // In case of NULL-removing inner-joins, we ignore all NULL values.
         // Such values can be created in several ways: join input already has non-phyiscal NULL values (non-physical
         // means no RowID, e.g., created during an OUTER join), a physical value is NULL but is ignored for an inner
@@ -510,7 +560,7 @@ RadixContainer<T> partition_radix_parallel(const RadixContainer<T>& radix_contai
           continue;
         }
 
-        const size_t radix = hash_function(static_cast<HashedType>(element.value)) & mask;
+        const size_t radix = hash_function(static_cast<HashedType>(element.value)) & radix_mask;
 
         // In case NULL values have been materialized in materialize_input(),
         // we need to keep them during the radix clustering phase.
@@ -593,6 +643,8 @@ void probe(const RadixContainer<ProbeColumnType>& probe_radix_container,
         for (size_t partition_offset = partition_begin; partition_offset < partition_end; ++partition_offset) {
           auto& probe_column_element = partition[partition_offset];
 
+          if (probe_column_element.skip) continue;
+
           if (mode == JoinMode::Inner && probe_column_element.row_id == NULL_ROW_ID) {
             // From previous joins, we could potentially have NULL values that do not refer to
             // an actual probe_column_element but to the NULL_ROW_ID. Hence, we can only skip for inner joins.
@@ -671,6 +723,7 @@ void probe(const RadixContainer<ProbeColumnType>& probe_radix_container,
 
           for (size_t partition_offset = partition_begin; partition_offset < partition_end; ++partition_offset) {
             auto& row = partition[partition_offset];
+            if (row.skip) continue;
             pos_list_build_side_local.emplace_back(NULL_ROW_ID);
             pos_list_probe_local.emplace_back(row.row_id);
           }
@@ -727,7 +780,7 @@ void probe_semi_anti(const RadixContainer<ProbeColumnType>& radix_probe_column,
 
           if constexpr (mode == JoinMode::Semi) {
             // NULLs on the probe side are never emitted
-            if (probe_column_element.row_id.chunk_offset == INVALID_CHUNK_OFFSET) {
+            if (probe_column_element.skip || probe_column_element.row_id.chunk_offset == INVALID_CHUNK_OFFSET) {
               continue;
             }
           } else if constexpr (mode == JoinMode::AntiNullAsFalse) {  // NOLINT - doesn't like else if constexpr

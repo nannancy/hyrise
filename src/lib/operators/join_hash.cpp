@@ -312,16 +312,18 @@ class JoinHash::JoinHashImpl : public AbstractJoinOperatorImpl {
 
     std::vector<std::shared_ptr<AbstractTask>> jobs;
 
+    std::vector<bool> bloom_filter;
+
     /**
      * 1.1 Schedule a JobTask for materialization, optional radix partitioning and hash table building for the build side
      */
     jobs.emplace_back(std::make_shared<JobTask>([&]() {
       if (keep_nulls_build_column) {
-        materialized_build_column = materialize_input<BuildColumnType, HashedType, true>(
-            _build_input_table, _column_ids.first, build_chunk_offsets, histograms_build_column, _radix_bits);
+        materialized_build_column = materialize_input<BuildColumnType, HashedType, true, JoinBloomFilterMode::Build>(
+            _build_input_table, _column_ids.first, build_chunk_offsets, histograms_build_column, _radix_bits, bloom_filter);
       } else {
-        materialized_build_column = materialize_input<BuildColumnType, HashedType, false>(
-            _build_input_table, _column_ids.first, build_chunk_offsets, histograms_build_column, _radix_bits);
+        materialized_build_column = materialize_input<BuildColumnType, HashedType, false, JoinBloomFilterMode::Build>(
+            _build_input_table, _column_ids.first, build_chunk_offsets, histograms_build_column, _radix_bits, bloom_filter);
       }
 
       if (_radix_bits > 0) {
@@ -352,17 +354,20 @@ class JoinHash::JoinHashImpl : public AbstractJoinOperatorImpl {
     }));
     jobs.back()->schedule();
 
+    Hyrise::get().scheduler()->wait_for_tasks(jobs);
+
+    jobs.clear();  // TODO benchmark MT
     /**
      * 1.2 Schedule a JobTask for materialization, optional radix partitioning for the probe side
      */
     jobs.emplace_back(std::make_shared<JobTask>([&]() {
       // Materialize probe column.
       if (keep_nulls_probe_column) {
-        materialized_probe_column = materialize_input<ProbeColumnType, HashedType, true>(
-            _probe_input_table, _column_ids.second, probe_chunk_offsets, histograms_probe_column, _radix_bits);
+        materialized_probe_column = materialize_input<ProbeColumnType, HashedType, true, JoinBloomFilterMode::Probe>(
+            _probe_input_table, _column_ids.second, probe_chunk_offsets, histograms_probe_column, _radix_bits, bloom_filter);
       } else {
-        materialized_probe_column = materialize_input<ProbeColumnType, HashedType, false>(
-            _probe_input_table, _column_ids.second, probe_chunk_offsets, histograms_probe_column, _radix_bits);
+        materialized_probe_column = materialize_input<ProbeColumnType, HashedType, false, JoinBloomFilterMode::Probe>(
+            _probe_input_table, _column_ids.second, probe_chunk_offsets, histograms_probe_column, _radix_bits, bloom_filter);
       }
 
       if (_radix_bits > 0) {
