@@ -463,7 +463,9 @@ RadixContainer<T> partition_radix_parallel(const RadixContainer<T>& radix_contai
   output->resize(container_elements.size());
 
   [[maybe_unused]] auto output_nulls = std::make_shared<std::vector<bool>>();
-
+  if constexpr (retain_null_values) {
+    output_nulls->resize(null_value_bitvector.size());
+  }
 
   RadixContainer<T> radix_output;
   radix_output.elements = output;
@@ -639,7 +641,14 @@ void probe(const RadixContainer<ProbeColumnType>& probe_radix_container,
         for (size_t partition_offset = partition_begin; partition_offset < partition_end; ++partition_offset) {
           auto& probe_column_element = partition[partition_offset];
 
-          if (probe_column_element.skip) continue; // TODO need to call else path below
+          if (probe_column_element.skip) {
+            // TODO dedup
+            if constexpr (keep_null_values) {
+              pos_list_build_side_local.emplace_back(NULL_ROW_ID);
+              pos_list_probe_local.emplace_back(probe_column_element.row_id);
+            }
+            continue;
+          }
 
           if (mode == JoinMode::Inner && probe_column_element.row_id == NULL_ROW_ID) {
             // From previous joins, we could potentially have NULL values that do not refer to
