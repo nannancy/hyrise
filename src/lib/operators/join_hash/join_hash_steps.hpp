@@ -239,7 +239,7 @@ RadixContainer<T> materialize_input(const std::shared_ptr<const Table>& in_table
   // create histograms per chunk
   histograms.resize(chunk_count);
 
-  constexpr auto bloom_filter_bits = 8;  // TODO
+  constexpr auto bloom_filter_bits = 16;  // TODO
   constexpr auto bloom_filter_size = 1 << bloom_filter_bits;
   constexpr auto bloom_filter_mask = bloom_filter_size - 1;
   auto chunk_bloom_filters = std::vector<std::vector<bool>>{};
@@ -299,7 +299,7 @@ RadixContainer<T> materialize_input(const std::shared_ptr<const Table>& in_table
             auto skip = false;
 
             if (!value.is_null()) {
-              const auto bloom_filter_value = hashed_value & bloom_filter_mask;
+              const auto bloom_filter_value = (hashed_value >> radix_bits) & bloom_filter_mask;
               if constexpr (bloom_filter_mode == JoinBloomFilterMode::Build) {
                 chunk_bloom_filter[bloom_filter_value] = true;
               } else if constexpr (bloom_filter_mode == JoinBloomFilterMode::Probe) {
@@ -547,8 +547,6 @@ RadixContainer<T> partition_radix_parallel(const RadixContainer<T>& radix_contai
       for (size_t chunk_offset = input_offset; chunk_offset < input_offset + input_size; ++chunk_offset) {
         const auto& element = container_elements[chunk_offset];
 
-        if (element.skip) continue;
-
         // In case of NULL-removing inner-joins, we ignore all NULL values.
         // Such values can be created in several ways: join input already has non-phyiscal NULL values (non-physical
         // means no RowID, e.g., created during an OUTER join), a physical value is NULL but is ignored for an inner
@@ -641,7 +639,7 @@ void probe(const RadixContainer<ProbeColumnType>& probe_radix_container,
         for (size_t partition_offset = partition_begin; partition_offset < partition_end; ++partition_offset) {
           auto& probe_column_element = partition[partition_offset];
 
-          if (probe_column_element.skip) continue;
+          if (probe_column_element.skip) continue; // TODO need to call else path below
 
           if (mode == JoinMode::Inner && probe_column_element.row_id == NULL_ROW_ID) {
             // From previous joins, we could potentially have NULL values that do not refer to
