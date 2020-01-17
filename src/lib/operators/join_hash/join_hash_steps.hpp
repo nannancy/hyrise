@@ -201,18 +201,23 @@ inline std::vector<size_t> determine_chunk_offsets(const std::shared_ptr<const T
 enum class JoinBloomFilterMode {
   Unused,
   Build,
-  Probe
+  ProbeAndBuild
 };
+
+constexpr auto bloom_filter_bits = 13;  // TODO
+constexpr auto bloom_filter_size = 1 << bloom_filter_bits;
+constexpr auto bloom_filter_mask = bloom_filter_size - 1;
 
 template <typename T, typename HashedType, bool retain_null_values, JoinBloomFilterMode bloom_filter_mode>
 RadixContainer<T> materialize_input(const std::shared_ptr<const Table>& in_table, ColumnID column_id,
                                     const std::vector<size_t>& chunk_offsets,
-                                    std::vector<std::vector<size_t>>& histograms, const size_t radix_bits, std::vector<bool>& bloom_filter) {
+                                    std::vector<std::vector<size_t>>& histograms, const size_t radix_bits, const std::vector<bool>& input_bloom_filter, std::vector<bool>& output_bloom_filter) {
   if (bloom_filter_mode == JoinBloomFilterMode::Build || bloom_filter_mode == JoinBloomFilterMode::Unused) {
-    DebugAssert(bloom_filter.empty(), "An empty bloom_filter must be passed in build/unused mode");
-  } else if (bloom_filter_mode == JoinBloomFilterMode::Probe) {
-    DebugAssert(!bloom_filter.empty(), "A filled bloom_filter must be passed in probe mode");
+    DebugAssert(input_bloom_filter.empty(), "An empty input_bloom_filter must be passed in build/unused mode");
+  } else if (bloom_filter_mode == JoinBloomFilterMode::ProbeAndBuild) {
+    DebugAssert(!input_bloom_filter.empty(), "A filled input_bloom_filter must be passed in probe mode");
   }
+  DebugAssert(output_bloom_filter.empty(), "The output_bloom_filter must always be empty");
 
   // Retrieve input row_count as it might change during execution if we work on a non-reference table
   auto row_count = in_table->row_count();
@@ -239,13 +244,10 @@ RadixContainer<T> materialize_input(const std::shared_ptr<const Table>& in_table
   // create histograms per chunk
   histograms.resize(chunk_count);
 
-  constexpr auto bloom_filter_bits = 16;  // TODO
-  constexpr auto bloom_filter_size = 1 << bloom_filter_bits;
-  constexpr auto bloom_filter_mask = bloom_filter_size - 1;
-  auto chunk_bloom_filters = std::vector<std::vector<bool>>{};
-  if (bloom_filter_mode == JoinBloomFilterMode::Build) {
-    chunk_bloom_filters.resize(chunk_count);
-    bloom_filter.resize(bloom_filter_size);
+  auto output_chunk_bloom_filters = std::vector<std::vector<bool>>{};
+  if (bloom_filter_mode == JoinBloomFilterMode::Build || bloom_filter_mode == JoinBloomFilterMode::ProbeAndBuild) {
+    output_chunk_bloom_filters.resize(chunk_count);
+    output_bloom_filter.resize(bloom_filter_size);
   }
 
   std::vector<std::shared_ptr<AbstractTask>> jobs;
@@ -263,9 +265,9 @@ RadixContainer<T> materialize_input(const std::shared_ptr<const Table>& in_table
       auto output_iterator = elements->begin() + output_offset;
       auto segment = chunk_in->get_segment(column_id);
 
-      auto& chunk_bloom_filter = chunk_bloom_filters[chunk_id];
-      if constexpr (bloom_filter_mode == JoinBloomFilterMode::Build) {
-        chunk_bloom_filter.resize(bloom_filter_size);
+      auto& output_chunk_bloom_filter = output_chunk_bloom_filters[chunk_id];
+      if constexpr (bloom_filter_mode == JoinBloomFilterMode::Build || bloom_filter_mode == JoinBloomFilterMode::ProbeAndBuild) {
+        output_chunk_bloom_filter.resize(bloom_filter_size);
       }
 
       [[maybe_unused]] auto null_value_bitvector_iterator = null_value_bitvector->begin();
@@ -301,9 +303,11 @@ RadixContainer<T> materialize_input(const std::shared_ptr<const Table>& in_table
             if (!value.is_null()) {
               const auto bloom_filter_value = (hashed_value >> radix_bits) & bloom_filter_mask;
               if constexpr (bloom_filter_mode == JoinBloomFilterMode::Build) {
-                chunk_bloom_filter[bloom_filter_value] = true;
-              } else if constexpr (bloom_filter_mode == JoinBloomFilterMode::Probe) {
-                if (!bloom_filter[bloom_filter_value]) {
+                output_chunk_bloom_filter[bloom_filter_value] = true;
+              } else if constexpr (bloom_filter_mode == JoinBloomFilterMode::ProbeAndBuild) {
+                if (input_bloom_filter[bloom_filter_value]) {
+                  output_chunk_bloom_filter[bloom_filter_value] = true;
+                } else {
                   skip = true;
                 }
               }
@@ -368,9 +372,10 @@ RadixContainer<T> materialize_input(const std::shared_ptr<const Table>& in_table
   }
   Hyrise::get().scheduler()->wait_for_tasks(jobs);
 
-  for (auto& chunk_bloom_filter : chunk_bloom_filters) {
+  for (auto& output_chunk_bloom_filter : output_chunk_bloom_filters) {
     for (auto bloom_filter_idx = size_t{0}; bloom_filter_idx < bloom_filter_size; ++bloom_filter_idx) {
-      bloom_filter[bloom_filter_idx] = bloom_filter[bloom_filter_idx] || chunk_bloom_filter[bloom_filter_idx];
+      // TODO output_chunk_bloom_filter may be empty
+      output_bloom_filter[bloom_filter_idx] = output_bloom_filter[bloom_filter_idx] || output_chunk_bloom_filter[bloom_filter_idx];
     }
   }
 
@@ -383,7 +388,7 @@ Build all the hash tables for the partitions of the build column. One job per pa
 
 template <typename BuildColumnType, typename HashedType>
 std::vector<std::optional<PosHashTable<HashedType>>> build(const RadixContainer<BuildColumnType>& radix_container,
-                                                           JoinHashBuildMode mode) {
+                                                           JoinHashBuildMode mode, const size_t radix_bits, const std::vector<bool>& input_bloom_filter) {
   /*
   NUMA notes:
   The hash tables for each partition P should also reside on the same node as the two vectors buildP and probeP.
@@ -406,6 +411,8 @@ std::vector<std::optional<PosHashTable<HashedType>>> build(const RadixContainer<
       continue;
     }
 
+    const std::hash<HashedType> hash_function;
+
     jobs.emplace_back(std::make_shared<JobTask>(
         [&, build_partition_begin, build_partition_end, current_partition_id, build_partition_size]() {
           auto& build_partition = static_cast<Partition<BuildColumnType>&>(*radix_container.elements);
@@ -416,8 +423,17 @@ std::vector<std::optional<PosHashTable<HashedType>>> build(const RadixContainer<
                ++partition_offset) {
             auto& element = build_partition[partition_offset];
 
-            if (element.row_id == NULL_ROW_ID || element.skip) {  // TODO also skip build for elements not seen on probe side
+            DebugAssert(!element.skip, "Elements on build side should never be marked as skipped");
+
+            if (element.row_id == NULL_ROW_ID) {
               // Skip initialized PartitionedElements that might remain after materialization phase.
+              continue;
+            }
+
+            const Hash hashed_value = hash_function(static_cast<HashedType>(element.value));
+            const auto bloom_filter_value = (hashed_value >> radix_bits) & bloom_filter_mask;
+
+            if (!input_bloom_filter[bloom_filter_value]) {
               continue;
             }
 

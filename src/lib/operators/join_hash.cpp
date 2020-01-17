@@ -314,7 +314,8 @@ class JoinHash::JoinHashImpl : public AbstractJoinOperatorImpl {
 
     std::vector<std::shared_ptr<AbstractTask>> jobs;
 
-    std::vector<bool> bloom_filter;
+    std::vector<bool> build_side_bloom_filter;
+    std::vector<bool> probe_side_bloom_filter;
 
     // std::cout << "init: " << t.lap_formatted() << std::endl;
 
@@ -324,11 +325,13 @@ class JoinHash::JoinHashImpl : public AbstractJoinOperatorImpl {
     jobs.emplace_back(std::make_shared<JobTask>([&]() {
       if (keep_nulls_build_column) {
         materialized_build_column = materialize_input<BuildColumnType, HashedType, true, JoinBloomFilterMode::Build>(
-            _build_input_table, _column_ids.first, build_chunk_offsets, histograms_build_column, _radix_bits, bloom_filter);
+            _build_input_table, _column_ids.first, build_chunk_offsets, histograms_build_column, _radix_bits, {}, build_side_bloom_filter);
       } else {
         materialized_build_column = materialize_input<BuildColumnType, HashedType, false, JoinBloomFilterMode::Build>(
-            _build_input_table, _column_ids.first, build_chunk_offsets, histograms_build_column, _radix_bits, bloom_filter);
+            _build_input_table, _column_ids.first, build_chunk_offsets, histograms_build_column, _radix_bits, {}, build_side_bloom_filter);
       }
+
+      // TODO: If build_side_bloom_filter is (mostly) filled, skip bloom for probe side?
 
       // std::cout << "materialize build: " << t.lap_formatted() << std::endl;
 
@@ -350,16 +353,6 @@ class JoinHash::JoinHashImpl : public AbstractJoinOperatorImpl {
         radix_build_column = std::move(materialized_build_column);
       }
 
-      // Build hash tables. In the case of semi or anti joins, we do not need to track all rows on the hashed side,
-      // just one per value. However, if we have secondary predicates, those might fail on that single row. In that
-      // case, we DO need all rows.
-      if (_secondary_predicates.empty() &&
-          (_mode == JoinMode::Semi || _mode == JoinMode::AntiNullAsTrue || _mode == JoinMode::AntiNullAsFalse)) {
-        hash_tables = build<BuildColumnType, HashedType>(radix_build_column, JoinHashBuildMode::SinglePosition);
-      } else {
-        hash_tables = build<BuildColumnType, HashedType>(radix_build_column, JoinHashBuildMode::AllPositions);
-      }
-      // std::cout << "hash table build: " << t.lap_formatted() << std::endl;
     }));
     jobs.back()->schedule();
 
@@ -372,11 +365,11 @@ class JoinHash::JoinHashImpl : public AbstractJoinOperatorImpl {
     jobs.emplace_back(std::make_shared<JobTask>([&]() {
       // Materialize probe column.
       if (keep_nulls_probe_column) {
-        materialized_probe_column = materialize_input<ProbeColumnType, HashedType, true, JoinBloomFilterMode::Probe>(
-            _probe_input_table, _column_ids.second, probe_chunk_offsets, histograms_probe_column, _radix_bits, bloom_filter);
+        materialized_probe_column = materialize_input<ProbeColumnType, HashedType, true, JoinBloomFilterMode::ProbeAndBuild>(
+            _probe_input_table, _column_ids.second, probe_chunk_offsets, histograms_probe_column, _radix_bits, build_side_bloom_filter, probe_side_bloom_filter);
       } else {
-        materialized_probe_column = materialize_input<ProbeColumnType, HashedType, false, JoinBloomFilterMode::Probe>(
-            _probe_input_table, _column_ids.second, probe_chunk_offsets, histograms_probe_column, _radix_bits, bloom_filter);
+        materialized_probe_column = materialize_input<ProbeColumnType, HashedType, false, JoinBloomFilterMode::ProbeAndBuild>(
+            _probe_input_table, _column_ids.second, probe_chunk_offsets, histograms_probe_column, _radix_bits, build_side_bloom_filter, probe_side_bloom_filter);
       }
       // std::cout << "materialize probe: " << t.lap_formatted() << std::endl;
 
@@ -400,6 +393,19 @@ class JoinHash::JoinHashImpl : public AbstractJoinOperatorImpl {
     jobs.back()->schedule();
 
     Hyrise::get().scheduler()->wait_for_tasks(jobs);
+
+    // TODO: If probe_side_bloom_filter is (mostly) filled, skip bloom for build side?
+
+    // Build hash tables. In the case of semi or anti joins, we do not need to track all rows on the hashed side,
+    // just one per value. However, if we have secondary predicates, those might fail on that single row. In that
+    // case, we DO need all rows.
+    if (_secondary_predicates.empty() &&
+        (_mode == JoinMode::Semi || _mode == JoinMode::AntiNullAsTrue || _mode == JoinMode::AntiNullAsFalse)) {
+      hash_tables = build<BuildColumnType, HashedType>(radix_build_column, JoinHashBuildMode::SinglePosition, _radix_bits, probe_side_bloom_filter);
+    } else {
+      hash_tables = build<BuildColumnType, HashedType>(radix_build_column, JoinHashBuildMode::AllPositions, _radix_bits, probe_side_bloom_filter);
+    }
+    // std::cout << "hash table build: " << t.lap_formatted() << std::endl;
 
     // Short cut for AntiNullAsTrue
     //   If there is any NULL value on the build side, do not bother probing as no tuples can be emitted
