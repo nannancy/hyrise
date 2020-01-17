@@ -207,7 +207,7 @@ enum class JoinBloomFilterMode {
   ProbeAndBuild
 };
 
-constexpr auto bloom_filter_bits = 18;  // TODO
+constexpr auto bloom_filter_bits = 16;  // TODO
 constexpr auto bloom_filter_size = 1 << bloom_filter_bits;
 constexpr auto bloom_filter_mask = bloom_filter_size - 1;
 
@@ -316,6 +316,7 @@ RadixContainer<T> materialize_input(const std::shared_ptr<const Table>& in_table
                     if constexpr (is_reference_segment_iterable_v<IterableType>) {
                       ++reference_chunk_offset;
                     }
+                    if (radix_bits > 0) ++histogram[0];
                     continue;
                   }
                 }
