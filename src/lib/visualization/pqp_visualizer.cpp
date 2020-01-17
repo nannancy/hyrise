@@ -2,6 +2,7 @@
 #include <string>
 #include <utility>
 
+#include "constant_mappings.hpp"
 #include "expression/expression_utils.hpp"
 #include "expression/pqp_subquery_expression.hpp"
 #include "operators/limit.hpp"
@@ -27,6 +28,29 @@ void PQPVisualizer::_build_graph(const std::vector<std::shared_ptr<AbstractOpera
   for (const auto& plan : plans) {
     _build_subtree(plan, visualized_ops);
   }
+
+  std::stringstream operator_breakdown_stream;
+  operator_breakdown_stream << "{Total by operator|{";
+  auto total_milliseconds = double{};
+  for (const auto& [operator_name, _] : duration_by_operator_name) {
+    operator_breakdown_stream << operator_name << "\\r";
+  }
+  operator_breakdown_stream << "total\\r";
+  operator_breakdown_stream << "|";
+  for (const auto& [_, nanoseconds] : duration_by_operator_name) {
+    const auto milliseconds = (nanoseconds.count() / 1e6);
+    total_milliseconds += milliseconds;
+
+    operator_breakdown_stream << milliseconds << "\\l";
+  }
+  operator_breakdown_stream << total_milliseconds << "\\l";
+  operator_breakdown_stream << "}}";
+
+  VizVertexInfo vertex_info = _default_vertex;
+  vertex_info.shape = "record";
+  vertex_info.font_name = "Monospace";
+  vertex_info.label = operator_breakdown_stream.str();
+  boost::add_vertex(vertex_info, _graph);
 }
 
 void PQPVisualizer::_build_subtree(const std::shared_ptr<const AbstractOperator>& op,
@@ -122,6 +146,8 @@ void PQPVisualizer::_add_operator(const std::shared_ptr<const AbstractOperator>&
     label += "\n\n" + format_duration(total);
     info.pen_width = total.count();
   }
+
+  duration_by_operator_name[op->name()] += op->performance_data().walltime;
 
   info.label = label;
   _add_vertex(op, info);

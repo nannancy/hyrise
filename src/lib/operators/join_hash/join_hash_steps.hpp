@@ -207,7 +207,7 @@ enum class JoinBloomFilterMode {
   ProbeAndBuild
 };
 
-constexpr auto bloom_filter_bits = 16;  // TODO
+constexpr auto bloom_filter_bits = 18;  // TODO
 constexpr auto bloom_filter_size = 1 << bloom_filter_bits;
 constexpr auto bloom_filter_mask = bloom_filter_size - 1;
 
@@ -784,6 +784,9 @@ void probe_semi_anti(const RadixContainer<ProbeColumnType>& radix_probe_column,
   [[maybe_unused]] const auto* probe_column_null_values =
       radix_probe_column.null_value_bitvector ? radix_probe_column.null_value_bitvector.get() : nullptr;
 
+  auto debug_all = size_t{};
+  auto debug_skipped = size_t{};
+
   for (size_t current_partition_id = 0; current_partition_id < radix_probe_column.partition_offsets.size();
        ++current_partition_id) {
     const auto partition_begin =
@@ -810,11 +813,13 @@ void probe_semi_anti(const RadixContainer<ProbeColumnType>& radix_probe_column,
                                                                    secondary_join_predicates);
 
         for (size_t partition_offset = partition_begin; partition_offset < partition_end; ++partition_offset) {
+          ++debug_all;
           const auto& probe_column_element = partition[partition_offset];
 
           if constexpr (mode == JoinMode::Semi) {
             // NULLs on the probe side are never emitted
             if (probe_column_element.row_id == SKIPPED_ROW_ID || probe_column_element.row_id.chunk_offset == INVALID_CHUNK_OFFSET) {
+              ++debug_skipped;
               continue;
             }
           } else if constexpr (mode == JoinMode::AntiNullAsFalse) {  // NOLINT - doesn't like else if constexpr
@@ -886,6 +891,7 @@ void probe_semi_anti(const RadixContainer<ProbeColumnType>& radix_probe_column,
   }
 
   Hyrise::get().scheduler()->wait_for_tasks(jobs);
+  // std::cout << "skipped " << debug_skipped << " / " << debug_all << std::endl;
 }
 
 using PosLists = std::vector<std::shared_ptr<const PosList>>;
