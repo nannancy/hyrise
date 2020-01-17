@@ -36,8 +36,11 @@ template <typename T>
 struct PartitionedElement {
   RowID row_id;
   T value;
-  bool skip{false};
 };
+
+constexpr auto SKIPPED_ROW_ID = RowID{ChunkID{0xDEAD}, ChunkOffset{0xDEAD}}; // TODO
+
+// TODO benchmark TPC-DS/JoinOrder
 
 // Initializing the partition vector takes some time. This is not necessary, because it will be overwritten anyway.
 // The uninitialized_vector behaves like a regular std::vector, but the entries are initially invalid.
@@ -204,7 +207,7 @@ enum class JoinBloomFilterMode {
   ProbeAndBuild
 };
 
-constexpr auto bloom_filter_bits = 13;  // TODO
+constexpr auto bloom_filter_bits = 16;  // TODO
 constexpr auto bloom_filter_size = 1 << bloom_filter_bits;
 constexpr auto bloom_filter_mask = bloom_filter_size - 1;
 
@@ -298,18 +301,28 @@ RadixContainer<T> materialize_input(const std::shared_ptr<const Table>& in_table
             // double
 
             const Hash hashed_value = hash_function(static_cast<HashedType>(value.value()));
-            auto skip = false;
 
             if (!value.is_null()) {
               const auto bloom_filter_value = (hashed_value >> radix_bits) & bloom_filter_mask;
-              if constexpr (bloom_filter_mode == JoinBloomFilterMode::Build) {
-                output_chunk_bloom_filter[bloom_filter_value] = true;
-              } else if constexpr (bloom_filter_mode == JoinBloomFilterMode::ProbeAndBuild) {
+
+              if constexpr (bloom_filter_mode == JoinBloomFilterMode::ProbeAndBuild) {
                 if (input_bloom_filter[bloom_filter_value]) {
                   output_chunk_bloom_filter[bloom_filter_value] = true;
                 } else {
-                  skip = true;
+                  if (!retain_null_values) {
+                    // We can only abuse the row_id field if it is not needed to keep the RowID of a NULL row
+                    *(output_iterator++) = PartitionedElement<T>{SKIPPED_ROW_ID, T{}};
+                    ++null_value_bitvector_iterator;
+                    if constexpr (is_reference_segment_iterable_v<IterableType>) {
+                      ++reference_chunk_offset;
+                    }
+                    continue;
+                  }
                 }
+              }
+
+              if constexpr (bloom_filter_mode == JoinBloomFilterMode::Build) {
+                output_chunk_bloom_filter[bloom_filter_value] = true;
               }
             }
 
@@ -319,9 +332,9 @@ RadixContainer<T> materialize_input(const std::shared_ptr<const Table>& in_table
             values from different inputs (important for Multi Joins).
             */
             if constexpr (is_reference_segment_iterable_v<IterableType>) {
-              *(output_iterator++) = PartitionedElement<T>{RowID{chunk_id, reference_chunk_offset}, value.value(), skip};
+              *(output_iterator++) = PartitionedElement<T>{RowID{chunk_id, reference_chunk_offset}, value.value()};
             } else {
-              *(output_iterator++) = PartitionedElement<T>{RowID{chunk_id, value.chunk_offset()}, value.value(), skip};
+              *(output_iterator++) = PartitionedElement<T>{RowID{chunk_id, value.chunk_offset()}, value.value()};
             }
 
             // In case we care about NULL values, store the NULL flag
@@ -423,7 +436,7 @@ std::vector<std::optional<PosHashTable<HashedType>>> build(const RadixContainer<
                ++partition_offset) {
             auto& element = build_partition[partition_offset];
 
-            DebugAssert(!element.skip, "Elements on build side should never be marked as skipped");
+            DebugAssert(!(element.row_id == SKIPPED_ROW_ID), "Elements on build side should never be marked as skipped");  // TODO add op!=
 
             if (element.row_id == NULL_ROW_ID) {
               // Skip initialized PartitionedElements that might remain after materialization phase.
@@ -657,7 +670,7 @@ void probe(const RadixContainer<ProbeColumnType>& probe_radix_container,
         for (size_t partition_offset = partition_begin; partition_offset < partition_end; ++partition_offset) {
           auto& probe_column_element = partition[partition_offset];
 
-          if (probe_column_element.skip) {
+          if (probe_column_element.row_id == SKIPPED_ROW_ID) {
             // TODO dedup
             if constexpr (keep_null_values) {
               pos_list_build_side_local.emplace_back(NULL_ROW_ID);
@@ -743,10 +756,10 @@ void probe(const RadixContainer<ProbeColumnType>& probe_radix_container,
           pos_list_probe_local.reserve(partition_end - partition_begin);
 
           for (size_t partition_offset = partition_begin; partition_offset < partition_end; ++partition_offset) {
-            auto& row = partition[partition_offset];
-            if (row.skip) continue;
+            auto& element = partition[partition_offset];
+            if (element.row_id == SKIPPED_ROW_ID) continue;
             pos_list_build_side_local.emplace_back(NULL_ROW_ID);
-            pos_list_probe_local.emplace_back(row.row_id);
+            pos_list_probe_local.emplace_back(element.row_id);
           }
         }
       }
@@ -801,7 +814,7 @@ void probe_semi_anti(const RadixContainer<ProbeColumnType>& radix_probe_column,
 
           if constexpr (mode == JoinMode::Semi) {
             // NULLs on the probe side are never emitted
-            if (probe_column_element.skip || probe_column_element.row_id.chunk_offset == INVALID_CHUNK_OFFSET) {
+            if (probe_column_element.row_id == SKIPPED_ROW_ID || probe_column_element.row_id.chunk_offset == INVALID_CHUNK_OFFSET) {
               continue;
             }
           } else if constexpr (mode == JoinMode::AntiNullAsFalse) {  // NOLINT - doesn't like else if constexpr
@@ -951,6 +964,7 @@ inline void write_output_segments(Segments& output_segments, const std::shared_p
           auto new_pos_list = std::make_shared<PosList>(pos_list->size());
           auto new_pos_list_iter = new_pos_list->begin();
           for (const auto& row : *pos_list) {
+            DebugAssert(!(row == SKIPPED_ROW_ID), "SKIPPED_ROW_ID marker should not have made it this far");
             if (row.chunk_offset == INVALID_CHUNK_OFFSET) {
               *new_pos_list_iter = row;
             } else {
