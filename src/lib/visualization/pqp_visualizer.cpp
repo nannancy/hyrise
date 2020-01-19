@@ -29,28 +29,41 @@ void PQPVisualizer::_build_graph(const std::vector<std::shared_ptr<AbstractOpera
     _build_subtree(plan, visualized_ops);
   }
 
-  std::stringstream operator_breakdown_stream;
-  operator_breakdown_stream << "{Total by operator|{";
-  auto total_milliseconds = double{};
-  for (const auto& [operator_name, _] : duration_by_operator_name) {
-    operator_breakdown_stream << operator_name << "\\r";
-  }
-  operator_breakdown_stream << "total\\r";
-  operator_breakdown_stream << "|";
-  for (const auto& [_, nanoseconds] : duration_by_operator_name) {
-    const auto milliseconds = (nanoseconds.count() / 1e6);
-    total_milliseconds += milliseconds;
+  {
+    // Print the "Total by operator" box
+    std::stringstream operator_breakdown_stream;
+    operator_breakdown_stream << "{Total by operator|{";
 
-    operator_breakdown_stream << milliseconds << "\\l";
-  }
-  operator_breakdown_stream << total_milliseconds << "\\l";
-  operator_breakdown_stream << "}}";
+    // Print first column (operator name)
+    for (const auto& [operator_name, _] : duration_by_operator_name) {
+      operator_breakdown_stream << " " << operator_name << " \\r";
+    }
+    operator_breakdown_stream << "total\\r";
 
-  VizVertexInfo vertex_info = _default_vertex;
-  vertex_info.shape = "record";
-  vertex_info.font_name = "Monospace";
-  vertex_info.label = operator_breakdown_stream.str();
-  boost::add_vertex(vertex_info, _graph);
+    // Print second column (operator duration) and track total durationc
+    operator_breakdown_stream << "|";
+    auto total_nanoseconds = std::chrono::nanoseconds{};
+    for (const auto& [_, nanoseconds] : duration_by_operator_name) {
+      operator_breakdown_stream << " " << format_duration(nanoseconds) << " \\l";  // TODO add percentage
+      total_nanoseconds += nanoseconds;
+    }
+    operator_breakdown_stream << " " << format_duration(total_nanoseconds) << " \\l";
+
+    // Print third column (relative operator duration)
+    operator_breakdown_stream << "|";
+    for (const auto& [_, nanoseconds] : duration_by_operator_name) {
+      operator_breakdown_stream << round(static_cast<double>(nanoseconds.count()) / total_nanoseconds.count() * 100) << " %\\l";  // TODO add percentage
+    }
+    operator_breakdown_stream << " \\l";
+
+    operator_breakdown_stream << "}}";
+
+    VizVertexInfo vertex_info = _default_vertex;
+    vertex_info.shape = "record";
+    vertex_info.font_name = "Monospace";  // TODO rly?
+    vertex_info.label = operator_breakdown_stream.str();
+    boost::add_vertex(vertex_info, _graph);
+  }
 }
 
 void PQPVisualizer::_build_subtree(const std::shared_ptr<const AbstractOperator>& op,
