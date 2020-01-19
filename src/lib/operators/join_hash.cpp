@@ -311,8 +311,6 @@ class JoinHash::JoinHashImpl : public AbstractJoinOperatorImpl {
     std::vector<bool> build_side_bloom_filter;
     std::vector<bool> probe_side_bloom_filter;
 
-    std::cout << "init: " << t.lap_formatted() << std::endl;
-
     /**
      * 1.1 Schedule a JobTask for materialization, optional radix partitioning and hash table building for the build side
      */

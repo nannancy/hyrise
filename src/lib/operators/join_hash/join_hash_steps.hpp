@@ -39,7 +39,7 @@ struct PartitionedElement {
   T value;
 };
 
-constexpr auto SKIPPED_ROW_ID = RowID{ChunkID{0xDEAD}, ChunkOffset{0xDEAD}}; // TODO
+constexpr auto SKIPPED_ROW_ID = RowID{ChunkID{0xDEAD}, INVALID_CHUNK_OFFSET}; // TODO
 
 // TODO benchmark TPC-DS/JoinOrder
 
@@ -106,11 +106,13 @@ class PosHashTable {
         pos_list.emplace_back(row_id);
       }
     } else {
-      Assert(_hash_table.size() < _pos_lists.size(), "Hash table too big for pre-allocated data structures");
+      DebugAssert(_hash_table.size() < _pos_lists.size(), "Hash table too big for pre-allocated data structures");
+
       auto& pos_list = _pos_lists[_hash_table.size()];
       pos_list.push_back(row_id);
       _hash_table.emplace(casted_value, _hash_table.size());
-      Assert(_hash_table.size() < std::numeric_limits<Offset>::max(), "Hash table too big for offset");
+
+      DebugAssert(_hash_table.size() < std::numeric_limits<Offset>::max(), "Hash table too big for offset");
     }
   }
 
@@ -213,8 +215,8 @@ RadixContainer<T> materialize_input(const std::shared_ptr<const Table>& in_table
   const size_t num_radix_partitions = 1ull << radix_bits;
 
   // currently, we just do one pass
-  size_t pass = 0;
-  size_t radix_mask = static_cast<uint32_t>(pow(2, radix_bits * (pass + 1)) - 1);
+  auto pass = size_t{0};
+  auto radix_mask = static_cast<size_t>(pow(2, radix_bits * (pass + 1)) - 1);
 
   // create histograms per chunk
   histograms.resize(chunk_count);
@@ -227,6 +229,8 @@ RadixContainer<T> materialize_input(const std::shared_ptr<const Table>& in_table
 
   std::vector<std::shared_ptr<AbstractTask>> jobs;
   jobs.reserve(chunk_count);
+
+  std::cout << "\tprepare: " << t.lap_formatted() << std::endl;
 
   for (ChunkID chunk_id{0}; chunk_id < chunk_count; ++chunk_id) {
     if (!in_table->get_chunk(chunk_id)) continue;
@@ -274,6 +278,7 @@ RadixContainer<T> materialize_input(const std::shared_ptr<const Table>& in_table
         // }
 
 
+  std::cout << "\tpre-loop: " << t.lap_formatted() << std::endl;
         while (it != end) {
           // if constexpr (is_dictionary_segment_iterable_v<IterableType> && bloom_filter_mode == JoinBloomFilterMode::ProbeAndBuild) {
           //   const auto value_id = it.value_id();
@@ -368,6 +373,7 @@ RadixContainer<T> materialize_input(const std::shared_ptr<const Table>& in_table
             break;
           }
         }
+  std::cout << "\tloop: " << t.lap_formatted() << std::endl;
       });
 
       if constexpr (std::is_same_v<Partition<T>, uninitialized_vector<PartitionedElement<T>>>) {  // NOLINT
@@ -391,6 +397,7 @@ RadixContainer<T> materialize_input(const std::shared_ptr<const Table>& in_table
   //   }
   // }
 
+  std::cout << "\tstuff: " << t.lap_formatted() << std::endl;
   return radix_container;
 }
 
@@ -629,14 +636,14 @@ void probe(const RadixContainer<ProbeColumnType>& probe_radix_container,
         for (auto partition_offset = size_t{0}; partition_offset < elements.size(); ++partition_offset) {  // TODO naming _idx vs _offset
           const auto& probe_column_element = elements[partition_offset];
 
-          if (probe_column_element.row_id == SKIPPED_ROW_ID) {
-            // TODO dedup
-            if constexpr (keep_null_values) {
-              pos_list_build_side_local.emplace_back(NULL_ROW_ID);
-              pos_list_probe_local.emplace_back(probe_column_element.row_id);
-            }
-            continue;
-          }
+          // if (probe_column_element.row_id == SKIPPED_ROW_ID) {
+          //   // TODO dedup
+          //   if constexpr (keep_null_values) {
+          //     pos_list_build_side_local.emplace_back(NULL_ROW_ID);
+          //     pos_list_probe_local.emplace_back(probe_column_element.row_id);
+          //   }
+          //   continue;
+          // }
 
           if (mode == JoinMode::Inner && probe_column_element.row_id == NULL_ROW_ID) {
             // From previous joins, we could potentially have NULL values that do not refer to
@@ -715,7 +722,7 @@ void probe(const RadixContainer<ProbeColumnType>& probe_radix_container,
           pos_list_probe_local.reserve(elements.size());
 
           for (auto partition_offset = size_t{0}; partition_offset < elements.size(); ++partition_offset) {
-            auto& element = elements[partition_offset];
+            const auto& element = elements[partition_offset];
             if (element.row_id == SKIPPED_ROW_ID) continue;
             pos_list_build_side_local.emplace_back(NULL_ROW_ID);
             pos_list_probe_local.emplace_back(element.row_id);
@@ -737,11 +744,12 @@ void probe_semi_anti(const RadixContainer<ProbeColumnType>& radix_probe_column, 
                      const std::vector<std::optional<PosHashTable<HashedType>>>& hash_tables,
                      std::vector<PosList>& pos_lists, const Table& build_table, const Table& probe_table,
                      const std::vector<OperatorJoinPredicate>& secondary_join_predicates) {
+  Timer t;
   std::vector<std::shared_ptr<AbstractTask>> jobs;
   jobs.reserve(radix_probe_column.size());
 
-  auto debug_all = size_t{};
-  auto debug_skipped = size_t{};
+  // auto debug_all = size_t{};
+  // auto debug_skipped = size_t{};
 
   for (size_t partition_idx = 0; partition_idx < radix_probe_column.size();
        ++partition_idx) {
@@ -769,15 +777,16 @@ void probe_semi_anti(const RadixContainer<ProbeColumnType>& radix_probe_column, 
                                                                    secondary_join_predicates);
 
         for (auto partition_offset = size_t{0}; partition_offset < elements.size(); ++partition_offset) {
-          ++debug_all;
+          // ++debug_all;
           const auto& probe_column_element = elements[partition_offset];
 
           if constexpr (mode == JoinMode::Semi) {
-            // NULLs on the probe side are never emitted
-            if (probe_column_element.row_id == SKIPPED_ROW_ID || probe_column_element.row_id.chunk_offset == INVALID_CHUNK_OFFSET) {
-              ++debug_skipped;
-              continue;
-            }
+            // // NULLs on the probe side are never emitted
+            // if (probe_column_element.row_id.chunk_offset == INVALID_CHUNK_OFFSET) {
+            // // Could be either skipped or NULL
+            //   // ++debug_skipped;
+            //   continue;
+            // }
           } else if constexpr (mode == JoinMode::AntiNullAsFalse) {  // NOLINT - doesn't like else if constexpr
             // NULL values on the probe side always lead to the tuple being emitted for AntiNullAsFalse, irrespective
             // of secondary predicates (`NULL("as false") AND <anything>` is always false)
@@ -817,6 +826,7 @@ void probe_semi_anti(const RadixContainer<ProbeColumnType>& radix_probe_column, 
             pos_list_local.emplace_back(probe_column_element.row_id);
           }
         }
+        std::cout << "\tprobe loop: " << t.lap_formatted() << std::endl;
       } else if constexpr (mode == JoinMode::AntiNullAsFalse) {  // NOLINT - doesn't like else if constexpr
         // no hash table on other side, but we are in AntiNullAsFalse mode which means all tuples from the probing side
         // get emitted.
@@ -847,6 +857,7 @@ void probe_semi_anti(const RadixContainer<ProbeColumnType>& radix_probe_column, 
   }
 
   Hyrise::get().scheduler()->wait_for_tasks(jobs);
+  std::cout << "\tend: " << t.lap_formatted() << std::endl;
   // std::cout << "skipped " << debug_skipped << " / " << debug_all << std::endl;
 }
 
