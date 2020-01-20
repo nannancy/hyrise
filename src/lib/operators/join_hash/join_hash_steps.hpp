@@ -433,7 +433,7 @@ std::vector<std::optional<PosHashTable<HashedType>>> build(const RadixContainer<
       continue;
     }
 
-    // const std::hash<HashedType> hash_function;
+    const std::hash<HashedType> hash_function;
 
     const auto insert_into_hash_table = [&, partition_idx]() {
       const auto hash_table_idx = radix_bits > 0 ? partition_idx : 0;
@@ -451,12 +451,12 @@ std::vector<std::optional<PosHashTable<HashedType>>> build(const RadixContainer<
           continue;
         }
 
-        // const Hash hashed_value = hash_function(static_cast<HashedType>(element.value));
-        // const auto bloom_filter_value = (hashed_value >> radix_bits) & bloom_filter_mask;
-        // // TODO assert hashed_value fits mask
-        // if (!input_bloom_filter[bloom_filter_value]) {
-        //   continue;
-        // }
+        const Hash hashed_value = hash_function(static_cast<HashedType>(element.value));
+        const auto bloom_filter_value = (hashed_value >> radix_bits) & bloom_filter_mask;
+        // TODO assert hashed_value fits mask
+        if (!input_bloom_filter[bloom_filter_value]) {
+          continue;
+        }
 
         hash_table->emplace(element.value, element.row_id);
       }
