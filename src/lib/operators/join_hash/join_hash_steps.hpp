@@ -194,12 +194,12 @@ RadixContainer<T> materialize_input(const std::shared_ptr<const Table>& in_table
                                     std::vector<std::vector<size_t>>& histograms, const size_t radix_bits, const std::vector<bool>& input_bloom_filter, std::vector<bool>& output_bloom_filter) {
   Timer t;
 
-  // if (bloom_filter_mode == JoinBloomFilterMode::Build || bloom_filter_mode == JoinBloomFilterMode::Unused) {
-  //   Assert(input_bloom_filter.empty(), "An empty input_bloom_filter must be passed in build/unused mode");
-  // } else if (bloom_filter_mode == JoinBloomFilterMode::ProbeAndBuild) {
-  //   Assert(!input_bloom_filter.empty(), "A filled input_bloom_filter must be passed in probe mode");
-  // }
-  // Assert(output_bloom_filter.empty(), "The output_bloom_filter must always be empty");
+  if (bloom_filter_mode == JoinBloomFilterMode::Build || bloom_filter_mode == JoinBloomFilterMode::Unused) {
+    Assert(input_bloom_filter.empty(), "An empty input_bloom_filter must be passed in build/unused mode");
+  } else if (bloom_filter_mode == JoinBloomFilterMode::ProbeAndBuild) {
+    Assert(!input_bloom_filter.empty(), "A filled input_bloom_filter must be passed in probe mode");
+  }
+  Assert(output_bloom_filter.empty(), "The output_bloom_filter must always be empty");
 
   // TODO undo DebugAssert->Assert
 
@@ -222,15 +222,13 @@ RadixContainer<T> materialize_input(const std::shared_ptr<const Table>& in_table
   histograms.resize(chunk_count);
 
   auto output_chunk_bloom_filters = std::vector<std::vector<bool>>{};
-  // if (bloom_filter_mode == JoinBloomFilterMode::Build || bloom_filter_mode == JoinBloomFilterMode::ProbeAndBuild) {
-  //   output_chunk_bloom_filters.resize(chunk_count);
-  //   output_bloom_filter.resize(bloom_filter_size);
-  // }
+  if (bloom_filter_mode == JoinBloomFilterMode::Build || bloom_filter_mode == JoinBloomFilterMode::ProbeAndBuild) {
+    output_chunk_bloom_filters.resize(chunk_count);
+    output_bloom_filter.resize(bloom_filter_size);
+  }
 
   std::vector<std::shared_ptr<AbstractTask>> jobs;
   jobs.reserve(chunk_count);
-
-  std::cout << "\tprepare: " << t.lap_formatted() << std::endl;
 
   for (ChunkID chunk_id{0}; chunk_id < chunk_count; ++chunk_id) {
     if (!in_table->get_chunk(chunk_id)) continue;
@@ -250,10 +248,10 @@ RadixContainer<T> materialize_input(const std::shared_ptr<const Table>& in_table
       auto elements_iter = elements.begin();
       [[maybe_unused]] auto null_values_iter = null_values.begin();
 
-      // auto& output_chunk_bloom_filter = output_chunk_bloom_filters[chunk_id];
-      // if constexpr (bloom_filter_mode == JoinBloomFilterMode::Build || bloom_filter_mode == JoinBloomFilterMode::ProbeAndBuild) {
-      //   output_chunk_bloom_filter.resize(bloom_filter_size);
-      // }
+      auto& output_chunk_bloom_filter = output_chunk_bloom_filters[chunk_id];
+      if constexpr (bloom_filter_mode == JoinBloomFilterMode::Build || bloom_filter_mode == JoinBloomFilterMode::ProbeAndBuild) {
+        output_chunk_bloom_filter.resize(bloom_filter_size);
+      }
 
       // prepare histogram
       auto histogram = std::vector<size_t>(num_radix_partitions);
@@ -269,30 +267,25 @@ RadixContainer<T> materialize_input(const std::shared_ptr<const Table>& in_table
           histogram[0] = std::distance(it, end);
         }
 
-        // std::optional<std::vector<bool>> value_id_has_no_match;
-        // if constexpr (is_dictionary_segment_iterable_v<IterableType> && bloom_filter_mode == JoinBloomFilterMode::ProbeAndBuild) {
-        //   // Does not necessarily mean that segment is a DictionarySegment
-        //   // TODO Does not get executed in debug mode - test if force-materializing makes a difference in terms of compile time
-        //   // TODO make sure we handle NULL correctly
-        //   value_id_has_no_match = std::vector<bool>(it.null_value_id() + 1);
-        // }
+        std::optional<std::vector<bool>> value_id_has_no_match;
+        if constexpr (is_dictionary_segment_iterable_v<IterableType> && bloom_filter_mode == JoinBloomFilterMode::ProbeAndBuild) {
+          // Does not necessarily mean that segment is a DictionarySegment
+          // TODO Does not get executed in debug mode - test if force-materializing makes a difference in terms of compile time
+          // TODO make sure we handle NULL correctly
+          value_id_has_no_match = std::vector<bool>(it.null_value_id() + 1);
+        }
 
-
-  std::cout << "\tpre-loop: " << t.lap_formatted() << std::endl;
         while (it != end) {
-          // if constexpr (is_dictionary_segment_iterable_v<IterableType> && bloom_filter_mode == JoinBloomFilterMode::ProbeAndBuild) {
-          //   const auto value_id = it.value_id();
-          //   if ((*value_id_has_no_match)[value_id]) {
-          //     if (!retain_null_values) {
-          //       // We can only abuse the row_id field if it is not needed to keep the RowID of a NULL row
-          //       *(elements_iter++) = PartitionedElement<T>{SKIPPED_ROW_ID, T{}};
-          //       ++null_values_iter;
-          //       if (radix_bits > 0) ++histogram[0];
-          //       ++it;
-          //       continue;
-          //     }
-          //   }
-          // }
+          if constexpr (is_dictionary_segment_iterable_v<IterableType> && bloom_filter_mode == JoinBloomFilterMode::ProbeAndBuild) {
+            const auto value_id = it.value_id();
+            if ((*value_id_has_no_match)[value_id]) {
+              if (!retain_null_values) {
+                // might still need it
+                ++it;
+                continue;
+              }
+            }
+          }
 
           const auto& value = *it;
 
@@ -302,37 +295,34 @@ RadixContainer<T> materialize_input(const std::shared_ptr<const Table>& in_table
             // double
             const Hash hashed_value = hash_function(static_cast<HashedType>(value.value()));
 
-            // if (!value.is_null()) {
-            //   const auto bloom_filter_value = (hashed_value >> radix_bits) & bloom_filter_mask;
+            if (!value.is_null()) {
+              const auto bloom_filter_value = (hashed_value >> radix_bits) & bloom_filter_mask;
 
-            //   if constexpr (bloom_filter_mode == JoinBloomFilterMode::ProbeAndBuild) {
-            //     if (input_bloom_filter[bloom_filter_value]) {
-            //       output_chunk_bloom_filter[bloom_filter_value] = true;
-            //     } else {
-            //       if (!retain_null_values) {
-            //         // We can only abuse the row_id field if it is not needed to keep the RowID of a NULL row
+              if constexpr (bloom_filter_mode == JoinBloomFilterMode::ProbeAndBuild) {
+                if (input_bloom_filter[bloom_filter_value]) {
+                  output_chunk_bloom_filter[bloom_filter_value] = true;
+                } else {
+                  if (!retain_null_values) {
+                    // We can only abuse the row_id field if it is not needed to keep the RowID of a NULL row
 
-            //         if constexpr (is_dictionary_segment_iterable_v<IterableType>) {
-            //           const auto value_id = it.value_id();
-            //           (*value_id_has_no_match)[value_id] = true;
-            //         }
+                    if constexpr (is_dictionary_segment_iterable_v<IterableType>) {
+                      const auto value_id = it.value_id();
+                      (*value_id_has_no_match)[value_id] = true;
+                    }
 
-            //         *(elements_iter++) = PartitionedElement<T>{SKIPPED_ROW_ID, T{}};
-            //         ++null_values_iter;
-            //         if constexpr (is_reference_segment_iterable_v<IterableType>) {
-            //           ++reference_chunk_offset;
-            //         }
-            //         if (radix_bits > 0) ++histogram[0];
-            //         ++it;
-            //         continue;
-            //       }
-            //     }
-            //   }
+                    if constexpr (is_reference_segment_iterable_v<IterableType>) {
+                      ++reference_chunk_offset;
+                    }
+                    ++it;
+                    continue;
+                  }
+                }
+              }
 
-            //   if constexpr (bloom_filter_mode == JoinBloomFilterMode::Build) {
-            //     output_chunk_bloom_filter[bloom_filter_value] = true;
-            //   }
-            // }
+              if constexpr (bloom_filter_mode == JoinBloomFilterMode::Build) {
+                output_chunk_bloom_filter[bloom_filter_value] = true;
+              }
+            }
 
             /*
             For ReferenceSegments we do not use the RowIDs from the referenced tables.
@@ -373,16 +363,13 @@ RadixContainer<T> materialize_input(const std::shared_ptr<const Table>& in_table
             break;
           }
         }
-  std::cout << "\tloop: " << t.lap_formatted() << std::endl;
       });
 
-      if constexpr (std::is_same_v<Partition<T>, uninitialized_vector<PartitionedElement<T>>>) {  // NOLINT
-        // Because the vector is uninitialized, we need to remove all slots that we did not
-        // use because the input values were NULL or because the bloom filter had a miss.
+      // We need to remove all slots that we did not
+      // use because the input values were NULL or because the bloom filter had a miss.
 
-        Assert(elements_iter <= elements.end(), "elements_iter has written past the end");
-        elements.resize(std::distance(elements.begin(), elements_iter));
-      }
+      Assert(elements_iter <= elements.end(), "elements_iter has written past the end");
+      elements.resize(std::distance(elements.begin(), elements_iter));
 
       histograms[chunk_id] = std::move(histogram);
     }));
@@ -390,14 +377,13 @@ RadixContainer<T> materialize_input(const std::shared_ptr<const Table>& in_table
   }
   Hyrise::get().scheduler()->wait_for_tasks(jobs);
 
-  // for (auto& output_chunk_bloom_filter : output_chunk_bloom_filters) {
-  //   for (auto bloom_filter_idx = size_t{0}; bloom_filter_idx < bloom_filter_size; ++bloom_filter_idx) {
-  //     // TODO output_chunk_bloom_filter may be empty
-  //     output_bloom_filter[bloom_filter_idx] = output_bloom_filter[bloom_filter_idx] || output_chunk_bloom_filter[bloom_filter_idx];
-  //   }
-  // }
+  for (auto& output_chunk_bloom_filter : output_chunk_bloom_filters) {
+    for (auto bloom_filter_idx = size_t{0}; bloom_filter_idx < bloom_filter_size; ++bloom_filter_idx) {
+      // TODO output_chunk_bloom_filter may be empty
+      output_bloom_filter[bloom_filter_idx] = output_bloom_filter[bloom_filter_idx] || output_chunk_bloom_filter[bloom_filter_idx];
+    }
+  }
 
-  std::cout << "\tstuff: " << t.lap_formatted() << std::endl;
   return radix_container;
 }
 
@@ -436,7 +422,7 @@ std::vector<std::optional<PosHashTable<HashedType>>> build(const RadixContainer<
       continue;
     }
 
-    // const std::hash<HashedType> hash_function;
+    const std::hash<HashedType> hash_function;
 
     const auto insert_into_hash_table = [&, partition_idx]() {
       const auto hash_table_idx = radix_bits > 0 ? partition_idx : 0;
@@ -454,12 +440,12 @@ std::vector<std::optional<PosHashTable<HashedType>>> build(const RadixContainer<
           continue;
         }
 
-        // const Hash hashed_value = hash_function(static_cast<HashedType>(element.value));
-        // const auto bloom_filter_value = (hashed_value >> radix_bits) & bloom_filter_mask;
-        // // TODO assert hashed_value fits mask
-        // if (!input_bloom_filter[bloom_filter_value]) {
-        //   continue;
-        // }
+        const Hash hashed_value = hash_function(static_cast<HashedType>(element.value));
+        const auto bloom_filter_value = (hashed_value >> radix_bits) & bloom_filter_mask;
+        // TODO assert hashed_value fits mask
+        if (!input_bloom_filter[bloom_filter_value]) {
+          continue;
+        }
 
         hash_table->emplace(element.value, element.row_id);
       }
@@ -636,14 +622,14 @@ void probe(const RadixContainer<ProbeColumnType>& probe_radix_container,
         for (auto partition_offset = size_t{0}; partition_offset < elements.size(); ++partition_offset) {  // TODO naming _idx vs _offset
           const auto& probe_column_element = elements[partition_offset];
 
-          // if (probe_column_element.row_id == SKIPPED_ROW_ID) {
-          //   // TODO dedup
-          //   if constexpr (keep_null_values) {
-          //     pos_list_build_side_local.emplace_back(NULL_ROW_ID);
-          //     pos_list_probe_local.emplace_back(probe_column_element.row_id);
-          //   }
-          //   continue;
-          // }
+          if (probe_column_element.row_id == SKIPPED_ROW_ID) {
+            // TODO dedup
+            if constexpr (keep_null_values) {
+              pos_list_build_side_local.emplace_back(NULL_ROW_ID);
+              pos_list_probe_local.emplace_back(probe_column_element.row_id);
+            }
+            continue;
+          }
 
           if (mode == JoinMode::Inner && probe_column_element.row_id == NULL_ROW_ID) {
             // From previous joins, we could potentially have NULL values that do not refer to
@@ -781,12 +767,12 @@ void probe_semi_anti(const RadixContainer<ProbeColumnType>& radix_probe_column, 
           const auto& probe_column_element = elements[partition_offset];
 
           if constexpr (mode == JoinMode::Semi) {
-            // // NULLs on the probe side are never emitted
-            // if (probe_column_element.row_id.chunk_offset == INVALID_CHUNK_OFFSET) {
-            // // Could be either skipped or NULL
-            //   // ++debug_skipped;
-            //   continue;
-            // }
+            // NULLs on the probe side are never emitted
+            if (probe_column_element.row_id.chunk_offset == INVALID_CHUNK_OFFSET) {
+            // Could be either skipped or NULL
+              // ++debug_skipped;
+              continue;
+            }
           } else if constexpr (mode == JoinMode::AntiNullAsFalse) {  // NOLINT - doesn't like else if constexpr
             // NULL values on the probe side always lead to the tuple being emitted for AntiNullAsFalse, irrespective
             // of secondary predicates (`NULL("as false") AND <anything>` is always false)
@@ -826,7 +812,6 @@ void probe_semi_anti(const RadixContainer<ProbeColumnType>& radix_probe_column, 
             pos_list_local.emplace_back(probe_column_element.row_id);
           }
         }
-        std::cout << "\tprobe loop: " << t.lap_formatted() << std::endl;
       } else if constexpr (mode == JoinMode::AntiNullAsFalse) {  // NOLINT - doesn't like else if constexpr
         // no hash table on other side, but we are in AntiNullAsFalse mode which means all tuples from the probing side
         // get emitted.
@@ -857,7 +842,6 @@ void probe_semi_anti(const RadixContainer<ProbeColumnType>& radix_probe_column, 
   }
 
   Hyrise::get().scheduler()->wait_for_tasks(jobs);
-  std::cout << "\tend: " << t.lap_formatted() << std::endl;
   // std::cout << "skipped " << debug_skipped << " / " << debug_all << std::endl;
 }
 
