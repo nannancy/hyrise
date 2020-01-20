@@ -250,7 +250,8 @@ RadixContainer<T> materialize_input(const std::shared_ptr<const Table>& in_table
       auto elements_iter = elements.begin();
       [[maybe_unused]] auto null_values_iter = null_values.begin();
 
-      auto& output_chunk_bloom_filter = output_chunk_bloom_filters[chunk_id];
+      // auto& output_chunk_bloom_filter = output_chunk_bloom_filters[chunk_id];
+      auto& output_chunk_bloom_filter = output_bloom_filter;  // TODO not thread-safe
       if constexpr (bloom_filter_mode == JoinBloomFilterMode::Build || bloom_filter_mode == JoinBloomFilterMode::ProbeAndBuild) {
         output_chunk_bloom_filter.resize(bloom_filter_size);
       }
@@ -388,12 +389,13 @@ RadixContainer<T> materialize_input(const std::shared_ptr<const Table>& in_table
 
   // std::cout << "\tmaterialization: skipped " << skipped1 << " / " << skipped2 << std::endl;
 
-  for (auto& output_chunk_bloom_filter : output_chunk_bloom_filters) {
-    for (auto bloom_filter_idx = size_t{0}; bloom_filter_idx < bloom_filter_size; ++bloom_filter_idx) {
-      // TODO output_chunk_bloom_filter may be empty
-      output_bloom_filter[bloom_filter_idx] = output_bloom_filter[bloom_filter_idx] || output_chunk_bloom_filter[bloom_filter_idx];
-    }
-  }
+  // TODO parallelize
+  // for (auto& output_chunk_bloom_filter : output_chunk_bloom_filters) {
+  //   for (auto bloom_filter_idx = size_t{0}; bloom_filter_idx < bloom_filter_size; ++bloom_filter_idx) {
+  //     // TODO output_chunk_bloom_filter may be empty
+  //     output_bloom_filter[bloom_filter_idx] = output_bloom_filter[bloom_filter_idx] || output_chunk_bloom_filter[bloom_filter_idx];
+  //   }
+  // }
 
   return radix_container;
 }
