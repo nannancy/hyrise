@@ -543,21 +543,21 @@ class JoinHash::JoinHashImpl : public AbstractJoinOperatorImpl {
       switch (_output_column_order) {
         case OutputColumnOrder::BuildFirstProbeSecond:
           write_output_segments(output_segments, _build_input_table, build_side_pos_lists_by_segment,
-                                build_side_pos_list);
+                                build_side_pos_list, _mode);
           write_output_segments(output_segments, _probe_input_table, probe_side_pos_lists_by_segment,
-                                probe_side_pos_list);
+                                probe_side_pos_list, _mode);
           break;
 
         case OutputColumnOrder::ProbeFirstBuildSecond:
           write_output_segments(output_segments, _probe_input_table, probe_side_pos_lists_by_segment,
-                                probe_side_pos_list);
+                                probe_side_pos_list, _mode);
           write_output_segments(output_segments, _build_input_table, build_side_pos_lists_by_segment,
-                                build_side_pos_list);
+                                build_side_pos_list, _mode);
           break;
 
         case OutputColumnOrder::ProbeOnly:
           write_output_segments(output_segments, _probe_input_table, probe_side_pos_lists_by_segment,
-                                probe_side_pos_list);
+                                probe_side_pos_list, _mode);
           break;
       }
 

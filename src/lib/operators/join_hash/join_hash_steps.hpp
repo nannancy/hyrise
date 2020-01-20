@@ -914,7 +914,7 @@ inline PosListsByChunk setup_pos_lists_by_chunk(const std::shared_ptr<const Tabl
  */
 inline void write_output_segments(Segments& output_segments, const std::shared_ptr<const Table>& input_table,
                                   const PosListsByChunk& input_pos_list_ptrs_sptrs_by_segments,
-                                  std::shared_ptr<PosList> pos_list) {
+                                  std::shared_ptr<PosList> pos_list, const JoinMode mode) {
   std::map<std::shared_ptr<PosLists>, std::shared_ptr<PosList>> output_pos_list_cache;
 
   // We might use this later, but want to have it outside of the for loop
@@ -952,8 +952,8 @@ inline void write_output_segments(Segments& output_segments, const std::shared_p
             }
             ++new_pos_list_iter;
           }
-          if (common_chunk_id && *common_chunk_id != INVALID_CHUNK_ID) {
-            // new_pos_list->guarantee_single_chunk();
+          if (common_chunk_id && *common_chunk_id != INVALID_CHUNK_ID && (mode == JoinMode::Semi || mode == JoinMode::AntiNullAsTrue || mode == JoinMode::AntiNullAsFalse)) {
+            new_pos_list->guarantee_single_chunk();
           }
 
           iter = output_pos_list_cache.emplace(input_table_pos_lists, new_pos_list).first;
@@ -972,6 +972,33 @@ inline void write_output_segments(Segments& output_segments, const std::shared_p
         output_segments.push_back(std::make_shared<ReferenceSegment>(dummy_table, column_id, pos_list));
       }
     } else {
+
+
+
+
+      {
+        // TODO any chance to make this nicer?
+        auto common_chunk_id = std::optional<ChunkID>{};
+        for (const auto& row : *pos_list) {
+          if (row.chunk_offset == INVALID_CHUNK_OFFSET) {
+            common_chunk_id = INVALID_CHUNK_ID;
+          } else {
+            if (!common_chunk_id) {
+              common_chunk_id = row.chunk_id;
+            } else if (*common_chunk_id != row.chunk_id) {
+              common_chunk_id = INVALID_CHUNK_ID;
+            }
+          }
+        }
+        if (common_chunk_id && *common_chunk_id != INVALID_CHUNK_ID && (mode == JoinMode::Semi || mode == JoinMode::AntiNullAsTrue || mode == JoinMode::AntiNullAsFalse)) {
+          pos_list->guarantee_single_chunk();
+        }
+      }
+
+
+
+
+
       output_segments.push_back(std::make_shared<ReferenceSegment>(input_table, column_id, pos_list));
     }
   }
