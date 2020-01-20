@@ -26,10 +26,17 @@ for file in sorted(glob.glob('*-PQP.svg')):
         operator_durations = []
 
         for operator_name in row_strings[0].split('|'):
-            operator_names.append(operator_name)
+            operator_names.append(operator_name.strip())
 
-        for operator_duration in row_strings[1].split('|'):
-            operator_durations.append(float(operator_duration))
+        for operator_duration_str in row_strings[1].split('|'):
+            operator_duration_str = operator_duration_str.replace(' min ', ' * 60 * 1e9 + ')
+            operator_duration_str = operator_duration_str.replace(' s ', ' * 1e9 + ')
+            operator_duration_str = operator_duration_str.replace(' ms ', ' * 1e6 + ')
+            operator_duration_str = operator_duration_str.replace(' µs ', ' * 1e3 + ')
+            operator_duration_str = operator_duration_str.replace(' ns ', ' + ')
+            operator_duration_str += '0'
+            operator_duration = float(eval(operator_duration_str))
+            operator_durations.append(operator_duration)
 
         operator_breakdown = dict(zip(operator_names, operator_durations))
         del operator_breakdown['total']
