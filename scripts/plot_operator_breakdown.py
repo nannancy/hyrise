@@ -45,13 +45,15 @@ for file in sorted(glob.glob('*-PQP.svg')):
 
 df = pd.DataFrame(all_operator_breakdowns).transpose() # TODO sort by operator name
 
+df.loc["Total"] = df.sum() / df.count()
 # Normalize data from nanoseconds to percentage of total cost
 df.iloc[:,0:] = df.iloc[:,0:].apply(lambda x: x / x.sum(), axis=1)
+df = df[df > .01].dropna(axis = 'columns', how = 'all')
 print(df)
 
 ax = df.plot.bar(stacked=True)
 ax.set_yticklabels(['{:,.0%}'.format(x) for x in ax.get_yticks()])
-ax.set_ylabel('Share of query run time')
+ax.set_ylabel('Share of query run time\n(Showing operators with >1%)')
 
 # Reverse legend so that it matches the stacked bars
 handles, labels = ax.get_legend_handles_labels()
