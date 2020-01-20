@@ -193,6 +193,8 @@ template <typename T, typename HashedType, bool retain_null_values, JoinBloomFil
 RadixContainer<T> materialize_input(const std::shared_ptr<const Table>& in_table, ColumnID column_id,
                                     std::vector<std::vector<size_t>>& histograms, const size_t radix_bits, const std::vector<bool>& input_bloom_filter, std::vector<bool>& output_bloom_filter) {
   Timer t;
+  auto skipped1 = size_t{0};
+  auto skipped2 = size_t{0};
 
   if (bloom_filter_mode == JoinBloomFilterMode::Build || bloom_filter_mode == JoinBloomFilterMode::Unused) {
     Assert(input_bloom_filter.empty(), "An empty input_bloom_filter must be passed in build/unused mode");
@@ -267,22 +269,28 @@ RadixContainer<T> materialize_input(const std::shared_ptr<const Table>& in_table
           histogram[0] = std::distance(it, end);
         }
 
-        std::optional<std::vector<bool>> value_id_has_no_match;
+        std::optional<std::vector<bool>> non_matching_value_ids;
         if constexpr (is_dictionary_segment_iterable_v<IterableType> && bloom_filter_mode == JoinBloomFilterMode::ProbeAndBuild) {
           // Does not necessarily mean that segment is a DictionarySegment
           // TODO Does not get executed in debug mode - test if force-materializing makes a difference in terms of compile time
           // TODO make sure we handle NULL correctly
-          value_id_has_no_match = std::vector<bool>(it.null_value_id() + 1);
+          if (segment->size() > it.null_value_id()) {
+            std::cout << "tracking non_matching_value_ids" << std::endl;
+            non_matching_value_ids = std::vector<bool>(it.null_value_id() + 1);
+          }
         }
 
         while (it != end) {
           if constexpr (is_dictionary_segment_iterable_v<IterableType> && bloom_filter_mode == JoinBloomFilterMode::ProbeAndBuild) {
-            const auto value_id = it.value_id();
-            if ((*value_id_has_no_match)[value_id]) {
-              if (!retain_null_values) {
-                // might still need it
-                ++it;
-                continue;
+            if (non_matching_value_ids) {
+              const auto value_id = it.value_id();
+              if ((*non_matching_value_ids)[value_id]) {
+                if (!retain_null_values) {
+                  // might still need it
+                  ++it;
+                  ++skipped1;
+                  continue;
+                }
               }
             }
           }
@@ -306,14 +314,17 @@ RadixContainer<T> materialize_input(const std::shared_ptr<const Table>& in_table
                     // We can only abuse the row_id field if it is not needed to keep the RowID of a NULL row
 
                     if constexpr (is_dictionary_segment_iterable_v<IterableType>) {
-                      const auto value_id = it.value_id();
-                      (*value_id_has_no_match)[value_id] = true;
+                      if (non_matching_value_ids) {
+                        const auto value_id = it.value_id();
+                        (*non_matching_value_ids)[value_id] = true;
+                      }
                     }
 
                     if constexpr (is_reference_segment_iterable_v<IterableType>) {
                       ++reference_chunk_offset;
                     }
                     ++it;
+                    ++skipped2;
                     continue;
                   }
                 }
@@ -376,6 +387,8 @@ RadixContainer<T> materialize_input(const std::shared_ptr<const Table>& in_table
     jobs.back()->schedule();
   }
   Hyrise::get().scheduler()->wait_for_tasks(jobs);
+
+  std::cout << "\tmaterialization: skipped " << skipped1 << " / " << skipped2 << std::endl;
 
   for (auto& output_chunk_bloom_filter : output_chunk_bloom_filters) {
     for (auto bloom_filter_idx = size_t{0}; bloom_filter_idx < bloom_filter_size; ++bloom_filter_idx) {
@@ -734,8 +747,8 @@ void probe_semi_anti(const RadixContainer<ProbeColumnType>& radix_probe_column, 
   std::vector<std::shared_ptr<AbstractTask>> jobs;
   jobs.reserve(radix_probe_column.size());
 
-  // auto debug_all = size_t{};
-  // auto debug_skipped = size_t{};
+  auto debug_all = size_t{};
+  auto debug_skipped = size_t{};
 
   for (size_t partition_idx = 0; partition_idx < radix_probe_column.size();
        ++partition_idx) {
@@ -763,14 +776,14 @@ void probe_semi_anti(const RadixContainer<ProbeColumnType>& radix_probe_column, 
                                                                    secondary_join_predicates);
 
         for (auto partition_offset = size_t{0}; partition_offset < elements.size(); ++partition_offset) {
-          // ++debug_all;
+          ++debug_all;
           const auto& probe_column_element = elements[partition_offset];
 
           if constexpr (mode == JoinMode::Semi) {
             // NULLs on the probe side are never emitted
             if (probe_column_element.row_id.chunk_offset == INVALID_CHUNK_OFFSET) {
             // Could be either skipped or NULL
-              // ++debug_skipped;
+              ++debug_skipped;
               continue;
             }
           } else if constexpr (mode == JoinMode::AntiNullAsFalse) {  // NOLINT - doesn't like else if constexpr
@@ -842,7 +855,7 @@ void probe_semi_anti(const RadixContainer<ProbeColumnType>& radix_probe_column, 
   }
 
   Hyrise::get().scheduler()->wait_for_tasks(jobs);
-  // std::cout << "skipped " << debug_skipped << " / " << debug_all << std::endl;
+  std::cout << "skipped " << debug_skipped << " / " << debug_all << std::endl;
 }
 
 using PosLists = std::vector<std::shared_ptr<const PosList>>;
@@ -920,15 +933,23 @@ inline void write_output_segments(Segments& output_segments, const std::shared_p
           // Get the row ids that are referenced
           auto new_pos_list = std::make_shared<PosList>(pos_list->size());
           auto new_pos_list_iter = new_pos_list->begin();
+          DebugAssert(!pos_list->empty(), "Did not expect an empty PosList");
+          auto common_chunk_id = (*pos_list)[0].chunk_id;
           for (const auto& row : *pos_list) {
             Assert(!(row == SKIPPED_ROW_ID), "SKIPPED_ROW_ID marker should not have made it this far");
             if (row.chunk_offset == INVALID_CHUNK_OFFSET) {
               *new_pos_list_iter = row;
+              common_chunk_id = INVALID_CHUNK_ID;
             } else {
               const auto& referenced_pos_list = *(*input_table_pos_lists)[row.chunk_id];
               *new_pos_list_iter = referenced_pos_list[row.chunk_offset];
+              if (row.chunk_id != common_chunk_id) common_chunk_id = INVALID_CHUNK_ID;
             }
             ++new_pos_list_iter;
+          }
+          if (common_chunk_id != INVALID_CHUNK_ID) {
+            std::cout << "GSC" << std::endl;
+            new_pos_list->guarantee_single_chunk();
           }
 
           iter = output_pos_list_cache.emplace(input_table_pos_lists, new_pos_list).first;

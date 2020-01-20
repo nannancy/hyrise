@@ -114,6 +114,11 @@ std::shared_ptr<const Table> JoinHash::_on_execute() {
                    input_table_right()->column_data_type(_primary_predicate.column_ids.second),
                    !_secondary_predicates.empty(), input_table_left()->type(), input_table_right()->type()}),
          "JoinHash doesn't support these parameters");
+
+  std::cout << "=======\n" << description(DescriptionMode::SingleLine) << "\n=======\n";
+
+  // TODO check if semi join reduction is still as valuable
+
   std::shared_ptr<const Table> build_input_table;
   std::shared_ptr<const Table> probe_input_table;
   auto build_column_id = ColumnID{};
