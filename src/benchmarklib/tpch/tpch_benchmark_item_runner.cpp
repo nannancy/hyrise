@@ -59,7 +59,6 @@ TPCHBenchmarkItemRunner::TPCHBenchmarkItemRunner(const std::shared_ptr<Benchmark
 const std::vector<BenchmarkItemID>& TPCHBenchmarkItemRunner::items() const { return _items; }
 
 bool TPCHBenchmarkItemRunner::_on_execute_item(const BenchmarkItemID item_id, BenchmarkSQLExecutor& sql_executor) {
-  std::cout << "----------" << std::endl;
   const auto sql = _build_query(item_id);
   std::shared_ptr<const Table> expected_result_table = nullptr;
   if (!_dedicated_expected_results.empty()) {
