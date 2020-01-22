@@ -331,7 +331,7 @@ void AggregateHash::_aggregate() {
                   const auto& value = position.value();
 
                   if constexpr (std::is_same_v<ColumnDataType, pmr_string>) {  // TODO harmonize - a similar branch is shown above
-                    if (value.length() < 4) {
+                    if (value.length() < 4) { // TODO make this dynamic dependent on the input table size
                       // Since \0 is prohibited as part of a database string, the empty string has the immediate ID 1.
                       auto immediate_id = uint64_t{1};
 
