@@ -41,7 +41,7 @@ for file in sorted(glob.glob('*-PQP.svg')):
         operator_breakdown = dict(zip(operator_names, operator_durations))
         del operator_breakdown['total']
 
-    all_operator_breakdowns[file.replace('-PQP.svg', '')] = operator_breakdown
+    all_operator_breakdowns[file.replace('-PQP.svg', '').replace('TPC-H_', 'Q')] = operator_breakdown
 
 df = pd.DataFrame(all_operator_breakdowns).transpose() # TODO sort by operator name
 
@@ -51,16 +51,16 @@ df.iloc[:,0:] = df.iloc[:,0:].apply(lambda x: x / x.sum(), axis=1)
 df = df[df > .01].dropna(axis = 'columns', how = 'all')
 print(df)
 
-ax = df.plot.bar(stacked=True)
+ax = df.plot.bar(stacked=True, figsize=(6,3))
 ax.set_yticklabels(['{:,.0%}'.format(x) for x in ax.get_yticks()])
-ax.set_ylabel('Share of query run time\n(Showing operators with >1%)')
+ax.set_ylabel('Share of run time\n(Hiding ops <1%)')
 
 # Reverse legend so that it matches the stacked bars
 handles, labels = ax.get_legend_handles_labels()
-ax.legend(reversed(handles), reversed(labels), bbox_to_anchor=(1.0, 1.0))
+lgd = ax.legend(reversed(handles), reversed(labels), loc='upper center', ncol=3, bbox_to_anchor=(0.5, -0.4))
 
 plt.tight_layout()
-plt.savefig('operator_breakdown.png')
+plt.savefig('operator_breakdown.pdf', bbox_extra_artists=(lgd,), bbox_inches='tight')
 
 # TODO filter operators that take less <1%
 # TODO Sum-up absolute (1 execution per item) and geomean
