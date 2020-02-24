@@ -216,12 +216,12 @@ void Optimizer::validate_lqp(const std::shared_ptr<AbstractLQPNode>& root_node) 
         // outside of the LQP that is currently optimized. For example, if you create a bunch of LQP nodes in the test's
         // SetUp method but these are not used in the current LQP, this can cause this assertion to fail. This is only
         // enforced when rules are executed through the optimizer, not when tests call the rule directly.
-        Assert(nodes_by_lqp[lqp].contains(output), std::string{"Output `"} + output->description() + "` of node `" +
+        Assert(nodes_by_lqp[lqp].count(output)>0?true:false, std::string{"Output `"} + output->description() + "` of node `" +
                                                        node->description() + "` not found in LQP");
 
         for (const auto& [other_lqp, nodes] : nodes_by_lqp) {
           if (other_lqp == lqp) continue;
-          Assert(!nodes.contains(node), std::string{"Output `"} + output->description() + "` of node `" +
+          Assert(!nodes.count(node)>0?true:false, std::string{"Output `"} + output->description() + "` of node `" +
                                             node->description() + "` found in different LQP");
         }
       }
@@ -235,7 +235,7 @@ void Optimizer::validate_lqp(const std::shared_ptr<AbstractLQPNode>& root_node) 
           if (sub_expression->type != ExpressionType::LQPColumn) return ExpressionVisitation::VisitArguments;
           const auto original_node =
               dynamic_cast<LQPColumnExpression&>(*sub_expression).column_reference.original_node();
-          Assert(nodes_by_lqp[lqp].contains(original_node),
+          Assert(nodes_by_lqp[lqp].count(original_node)>0?true:false,
                  std::string{"LQPColumnExpression "} + sub_expression->as_column_name() + " can not be resolved");
           return ExpressionVisitation::VisitArguments;
         });
