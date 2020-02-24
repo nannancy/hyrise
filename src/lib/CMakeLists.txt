@@ -86,8 +86,6 @@ set(
     expression/unary_minus_expression.hpp
     expression/value_expression.cpp
     expression/value_expression.hpp
-    hyrise.cpp
-    hyrise.hpp
     import_export/binary/binary_parser.cpp
     import_export/binary/binary_parser.hpp
     import_export/binary/binary_writer.cpp
@@ -591,6 +589,8 @@ set(
     visualization/pqp_visualizer.hpp
     visualization/viz_record_layout.cpp
     visualization/viz_record_layout.hpp
+    hyrise.cpp
+    hyrise.hpp
     ${CMAKE_BINARY_DIR}/version.hpp
 )
 
